@@ -70,22 +70,23 @@
   );
 
   // Check if user can check in
-  const canCheckIn = $derived(
-    !loading &&
-    !checkingIn &&
-    gpsStatus === 'ready' &&
-    distance !== null &&
-    distance <= OFFICE.maxDistance &&
-    todayAttendance === null
-  );
+const canCheckIn = $derived(
+  !loading &&
+  !checkingIn &&
+  gpsStatus === 'ready' &&
+  distance !== null &&
+  distance <= OFFICE.maxDistance &&
+  todayAttendance === null
+);
+
   
   // Check if user can check out
   const canCheckOut = $derived(
     !loading &&
     !checkingOut &&
     todayAttendance !== null &&
-    todayAttendance.checked_in === true &&
-    todayAttendance.checked_out === false &&
+    (todayAttendance.checked_in === true || !!todayAttendance.check_in_time) &&
+    (todayAttendance.checked_out === false || !todayAttendance.check_out_time) &&
     !['permission', 'sick'].includes(todayAttendance.status)
   );
 
@@ -100,7 +101,7 @@
   // Attendance completion status
   const attendanceComplete = $derived(
     todayAttendance !== null && 
-    (todayAttendance.checked_out === true || ['permission', 'sick'].includes(todayAttendance.status))
+    ((todayAttendance.checked_out === true || !!todayAttendance.check_out_time) || ['permission', 'sick'].includes(todayAttendance.status))
   );
 
   // ==================== GEOLOCATION ====================
@@ -193,7 +194,7 @@
   // ==================== MAP INITIALIZATION ====================
   
   function initMap() {
-    if (typeof window === 'undefined' || !window.L) return;
+    if (typeof window === 'undefined') return;
     
     if (map) {
       map.remove();
@@ -234,38 +235,47 @@
   async function fetchDashboardData() {
     dashboardLoading = true;
     try {
-      const res = await api.getInternDashboardData();
-      const data = res.data;
+      const [tasksRes, attendanceRes, historyRes] = await Promise.all([
+        api.getTasks({ limit: 100 }),
+        api.getTodayAttendance(),
+        api.getAttendance({ limit: 30 })
+      ]);
       
-      // Parse today's attendance
-      todayAttendance = data.today_attendance?.checked_in ? data.today_attendance : null;
+      const tasks = tasksRes.data || [];
+    //   const todayData = attendanceRes.data;
+      const history = historyRes.data || [];
 
-      // Parse dashboard data
+      // Parse today's attendance (handle array or object, or nested attendance property like in Attendance.svelte)
+todayAttendance = attendanceRes.data?.attendance || null;
+
+
+      // Calculate task stats
+      const taskStats = { pending: 0, in_progress: 0, submitted: 0, completed: 0, revision: 0 };
+      tasks.forEach(t => {
+        if (taskStats[t.status] !== undefined) taskStats[t.status]++;
+      });
+
+      // Process weekly attendance
+      const weeklyStats = processWeeklyAttendance(history);
+
+      // Calculate attendance percentage
+      const presentCount = history.filter(h => ['present', 'late'].includes(h.status)).length;
+      const totalDays = history.length || 1;
+      const attendancePercentage = Math.round((presentCount / totalDays) * 100);
+
       dashboardData = {
-        totalTasks: data.task_stats?.total || 0,
-        pendingTasks: data.task_stats?.pending || 0,
-        completedTasks: data.task_stats?.completed || 0,
-        inProgressTasks: data.task_stats?.in_progress || 0,
-        taskStats: data.task_stats || {},
-        taskBreakdown: data.task_breakdown || {},
-        recentTasks: data.recent_tasks || [],
-        weeklyAttendance: {
-          days: data.weekly_attendance_counts?.labels || [],
-          counts: data.weekly_attendance_counts?.data || [],
-          colors: data.weekly_attendance_counts?.colors || []
-        },
-        attendancePercentage: data.attendance_percentage || 0,
-        attendanceHistory: data.attendance_history || [],
-        office: data.office || null
+        totalTasks: tasks.length,
+        pendingTasks: taskStats.pending,
+        completedTasks: taskStats.completed,
+        inProgressTasks: taskStats.in_progress,
+        taskStats: taskStats,
+        taskBreakdown: taskStats,
+        recentTasks: tasks.slice(0, 5),
+        weeklyAttendance: weeklyStats,
+        attendancePercentage: attendancePercentage,
+        attendanceHistory: history,
+        office: null
       };
-
-      // Override OFFICE config if backend provides it
-      if (data.office?.latitude && data.office?.longitude) {
-        OFFICE.lat = data.office.latitude;
-        OFFICE.lng = data.office.longitude;
-        OFFICE.maxDistance = data.office.radius || 1000;
-        OFFICE.name = data.office.name || OFFICE.name;
-      }
 
       // Initialize charts after data is loaded
       setTimeout(initCharts, 100);
@@ -274,6 +284,40 @@
     } finally {
       dashboardLoading = false;
     }
+  }
+
+  function processWeeklyAttendance(history) {
+    const days = [];
+    const counts = [];
+    const colors = [];
+    const today = new Date();
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(today.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayName = d.toLocaleDateString('id-ID', { weekday: 'short' });
+      
+      days.push(dayName);
+      
+      const record = history.find(h => {
+        const hDate = h.date || (h.check_in_time ? h.check_in_time.split('T')[0] : '');
+        return hDate === dateStr;
+      });
+
+      if (record) {
+        counts.push(1);
+        if (record.status === 'present') colors.push('#10b981');
+        else if (record.status === 'late') colors.push('#f59e0b');
+        else if (record.status === 'sick') colors.push('#6366f1');
+        else if (record.status === 'permission') colors.push('#8b5cf6');
+        else colors.push('#ef4444');
+      } else {
+        counts.push(0);
+        colors.push('#e2e8f0');
+      }
+    }
+    return { days, counts, colors };
   }
 
   // ==================== CHART INITIALIZATION ====================
@@ -453,9 +497,6 @@
   onMount(async () => {
     loading = true;
     
-    // Initialize map first
-    initMap();
-    
     // Start geolocation
     initGeolocation();
     
@@ -463,6 +504,12 @@
     await fetchDashboardData();
     
     loading = false;
+    
+    // Initialize map after DOM is ready
+    setTimeout(() => {
+      initMap();
+      updateMapPosition();
+    }, 100);
   });
 
   onDestroy(() => {
@@ -506,14 +553,40 @@
     const date = new Date(dateStr);
     return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
   }
+
+  function formatTime(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  }
 </script>
 
 <svelte:head>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" />
 </svelte:head>
 
 <style>
+
+
+:root {
+  --bg: #f9fafb;
+  --card: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --ring: #d1d5db;
+}
+
+  .material-symbols-outlined {
+    font-variation-settings:
+      'FILL' 0,
+      'wght' 200,
+      'GRAD' 0,
+      'opsz' 20;
+  }
+
   :global(.user-marker), :global(.office-marker) {
     z-index: 1000 !important;
   }
@@ -528,18 +601,93 @@
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
   }
+
+
+
+
+.action-pill {
+  padding: 0.5rem 0.9rem;   /* slimmer */
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  min-height: 2.5rem;       /* reduced thickness */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+/* Primary action (check-in/out) */
+.pill-primary {
+  background: #111;
+  color: white;
+  border-color: #111;
+}
+
+.pill-primary:hover:not(:disabled) {
+  background: #000;
+}
+
+/* Secondary action (izin/sakit) */
+.pill-secondary {
+  background: #f3f4f6;
+  color: #111;
+  border-color: var(--border);
+  border: 1px solid;
+}
+
+.pill-secondary:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+/* Success pill (clock-in info) */
+.pill-success {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+    cursor: not-allowed;
+
+}
+
+.action-pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+  .map-reset {
+    position: absolute;
+    bottom: 1rem;
+    right: 1rem;
+    z-index: 400;
+    background: white;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .map-reset:hover {
+    background: #f3f4f6;
+    transform: scale(1.05);
+  }
+
 </style>
 
 <div class="slide-up max-w-[1600px] mx-auto space-y-6">
   <!-- Header -->
   <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
     <div>
-      <h2 class="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight mb-1">
-        Selamat datang kembali, {auth.user?.name || 'User'}!
-      </h2>
-      <p class="text-slate-500 font-medium text-sm sm:text-base">
-        Berikut ringkasan aktivitas magang Anda.
-      </p>
+<h2 class="text-xl font-semibold text-slate-800 tracking-tight">
+  Welcome back, {auth.user?.name}
+</h2>
+
     </div>
     <div class="text-right hidden sm:block">
       <div class="text-sm font-semibold text-slate-600">
@@ -560,9 +708,9 @@
         
         <!-- ATTENDANCE CARD -->
         <div class="card p-0 overflow-hidden">
-          <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+<div class="px-3 py-2 sm:px-6 sm:py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
             <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
-              <i class="fas fa-map-marked-alt text-indigo-500"></i> Presensi Harian
+              <span class="material-symbols-outlined text-indigo-500">map</span> Presensi Harian
             </h3>
             <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold"
                  class:bg-emerald-100={gpsStatus === 'ready'}
@@ -583,18 +731,24 @@
             </div>
           </div>
 
-          <div class="p-4 sm:p-6 space-y-4">
+<div class="p-4 sm:p-5 space-y-4">
             <!-- Map -->
-            <div class="relative h-[220px] sm:h-[300px] w-full rounded-xl overflow-hidden border border-slate-200 shadow-inner">
+            <div class="relative h-[250px] sm:h-[300px] w-full rounded-xl overflow-hidden border-slate-200 shadow-inner">
               <div id="map" class="h-full w-full z-0"></div>
+              <button class="map-reset" onclick={() => map?.setView([OFFICE.lat, OFFICE.lng], 15)} aria-label="Target" title="Target">
+                <span class="material-symbols-outlined text-slate-600">gps_fixed</span>
+              </button>
             </div>
 
             <!-- Office Info & Distance -->
-            <div class="flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-              <span class="text-sm font-medium text-slate-600 flex items-center gap-2">
-                <i class="fas fa-building text-slate-400"></i> Kantor: 
-                <span class="font-bold text-slate-800">{OFFICE.name}</span>
-              </span>
+<div class="flex flex-col sm:flex-row justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-100">
+  <span class="text-sm font-medium text-slate-600 flex items-center gap-2 whitespace-nowrap">
+    <i class="material-symbols-outlined text-slate-400">domain</i>
+    Kantor:
+    <span class="font-bold text-slate-800">
+      {OFFICE.name}
+    </span>
+  </span>
               <span class="text-sm font-medium text-slate-600">
                 Jarak: <span class="font-mono font-bold" 
                             class:text-emerald-600={distance !== null && distance <= OFFICE.maxDistance}
@@ -611,7 +765,7 @@
                 <!-- Attendance Completed -->
                 <div class="text-center p-6 bg-emerald-50/50 border border-emerald-100 rounded-xl">
                   <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 shadow-sm">
-                    <i class="fas fa-check"></i>
+                    <span class="material-symbols-outlined text-3xl">check</span>
                   </div>
                   <h4 class="font-bold text-emerald-800 text-lg">Selesai Hari Ini</h4>
                   <p class="text-emerald-600 font-medium text-sm mt-1">
@@ -620,60 +774,57 @@
                 </div>
               {:else if canCheckOut}
                 <!-- Show Check-In Time & Check-Out Button -->
-                <div class="text-center mb-4">
-                  <div class="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-50 text-emerald-700 font-medium text-sm border border-emerald-100">
-                    <i class="fas fa-check-circle mr-2"></i> Anda masuk pukul 
-                    <strong class="ml-1">{todayAttendance?.check_in_time || 'N/A'}</strong>
-                  </div>
-                </div>
-                <button
-                  onclick={handleCheckOut}
-                  disabled={checkingOut}
-                  class="btn w-full py-3.5 text-base font-bold bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                  {#if checkingOut}
-                    <span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
-                    Processing...
-                  {:else}
-                    <i class="fas fa-sign-out-alt mr-2"></i> PRESENSI KELUAR SEKARANG
-                  {/if}
-                </button>
-              {:else}
-                <!-- Check-In Button -->
-                <button
-                  onclick={handleCheckIn}
-                  disabled={!canCheckIn || checkingIn}
-                  class="btn w-full py-3.5 text-base font-bold shadow-lg shadow-indigo-500/20 transition-all"
-                  class:bg-indigo-600={canCheckIn}
-                  class:text-white={canCheckIn}
-                  class:hover:bg-indigo-700={canCheckIn}
-                  class:bg-slate-300={!canCheckIn}
-                  class:text-slate-500={!canCheckIn}
-                  class:cursor-not-allowed={!canCheckIn}
-                  class:opacity-50={!canCheckIn || checkingIn}>
-                  {#if checkingIn}
-                    <span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
-                    Processing...
-                  {:else if gpsStatus === 'loading'}
-                    <i class="fas fa-spinner fa-spin mr-2"></i> Menunggu GPS...
-                  {:else if gpsStatus === 'denied'}
-                    <i class="fas fa-exclamation-triangle mr-2"></i> GPS Ditolak
-                  {:else if gpsStatus === 'error'}
-                    <i class="fas fa-exclamation-circle mr-2"></i> GPS Error
-                  {:else if distance === null}
-                    <i class="fas fa-location-arrow mr-2"></i> Menunggu Lokasi...
-                  {:else if distance > OFFICE.maxDistance}
-                    <i class="fas fa-map-marker-alt mr-2"></i> Terlalu Jauh ({distance}m)
-                  {:else}
-                    <i class="fas fa-sign-in-alt mr-2"></i> PRESENSI MASUK SEKARANG
-                  {/if}
-                </button>
+                <div class="flex flex-col sm:flex-row gap-3">
 
-                <!-- Permission Button -->
-                <button
-                  onclick={() => showPermissionModal = true}
-                  class="btn w-full mt-3 py-2.5 text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200">
-                  <i class="fas fa-file-medical mr-2"></i> Ajukan Izin/Sakit
-                </button>
+<div class="flex-1 action-pill pill-success text-emerald-700 border-emerald-100 shadow-sm text-sm">
+                    <span class="material-symbols-outlined mr-2">schedule</span> 
+                    <span>Masuk Pada: <strong class="font-mono text-base">{formatTime(todayAttendance?.check_in_time)}</strong></span>
+                  </div>
+                  <button
+                    onclick={handleCheckOut}
+                    disabled={checkingOut}
+  class="flex-1 action-pill pill-primary text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed shadow-sm">
+                    {#if checkingOut}
+                      <span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                      Processing...
+                    {:else}
+                      <span class="material-symbols-outlined mr-2">logout</span> PRESENSI KELUAR
+                    {/if}
+                  </button>
+                </div>
+              {:else}
+                <div class="flex flex-col sm:flex-row gap-3">
+
+                  <!-- Check-In Button -->
+                  <button
+                    onclick={handleCheckIn}
+                    disabled={!canCheckIn || checkingIn}
+  class="flex-1 action-pill pill-primary text-sm sm:text-base disabled:cursor-not-allowed shadow-sm">
+                    {#if checkingIn}
+                      <span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                      Processing...
+                    {:else if gpsStatus === 'loading'}
+                      <span class="material-symbols-outlined animate-spin mr-2">progress_activity</span> Menunggu GPS...
+                    {:else if gpsStatus === 'denied'}
+                      <span class="material-symbols-outlined mr-2">warning</span> GPS Ditolak
+                    {:else if gpsStatus === 'error'}
+                      <span class="material-symbols-outlined mr-2">error</span> GPS Error
+                    {:else if distance === null}
+                      <span class="material-symbols-outlined mr-2">near_me</span> Menunggu Lokasi...
+                    {:else if distance > OFFICE.maxDistance}
+                      <span class="material-symbols-outlined mr-2">location_on</span> Terlalu Jauh ({distance}m)
+                    {:else}
+                      <span class="material-symbols-outlined mr-2">login</span> PRESENSI MASUK
+                    {/if}
+                  </button>
+
+                  <!-- Permission Button -->
+                  <button
+                    onclick={() => showPermissionModal = true}
+  class="flex-1 action-pill pill-secondary text-sm sm:text-base shadow-sm">
+                    <span class="material-symbols-outlined mr-2">sick</span> Izin / Sakit
+                  </button>
+                </div>
               {/if}
             </div>
           </div>
@@ -681,9 +832,9 @@
 
         <!-- TASKS CARD -->
         <div class="card p-0 overflow-hidden">
-          <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+<div class="px-5 py-5 sm:px-8 sm:py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
             <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
-              <i class="fas fa-clipboard-list text-teal-500"></i> Tugas Saya
+              <span class="material-symbols-outlined text-teal-500">assignment</span> Tugas Saya
             </h3>
             <a href="/tasks" class="text-xs font-bold text-teal-600 hover:text-teal-700 uppercase tracking-wider hover:underline">
               Lihat Semua
@@ -732,7 +883,7 @@
               <div class="space-y-3">
                 <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Tugas Terbaru</h4>
                 {#each dashboardData.recentTasks as task}
-                  <div class="p-3 bg-slate-50 rounded-lg border border-slate-100 hover:shadow-sm transition-all">
+                  <a href="/tasks/{task.id}" class="block p-3 bg-slate-50 rounded-lg border border-slate-200 hover:shadow-sm hover:bg-white transition-all">
                     <div class="flex justify-between items-start mb-2">
                       <h5 class="font-semibold text-slate-800 text-sm">{task.title}</h5>
                       <span class="px-2 py-0.5 rounded text-[10px] font-bold border {getStatusBadgeClass(task.status)}">
@@ -741,24 +892,24 @@
                     </div>
                     <div class="flex items-center gap-3 text-xs text-slate-500">
                       {#if task.deadline}
-                        <span><i class="fas fa-calendar-alt mr-1"></i>{formatDate(task.deadline)}</span>
+                        <span class="flex items-center"><span class="material-symbols-outlined text-[16px] mr-1">calendar_today</span>{formatDate(task.deadline)}</span>
                       {/if}
                       {#if task.priority}
-                        <span class="capitalize">
-                          <i class="fas fa-flag mr-1" 
+                        <span class="capitalize flex items-center">
+                          <span class="material-symbols-outlined text-[16px] mr-1" 
                              class:text-red-500={task.priority === 'high'}
                              class:text-amber-500={task.priority === 'medium'}
-                             class:text-slate-400={task.priority === 'low'}></i>
+                             class:text-slate-400={task.priority === 'low'}>flag</span>
                           {task.priority}
                         </span>
                       {/if}
                     </div>
-                  </div>
+                  </a>
                 {/each}
               </div>
             {:else}
               <div class="text-center py-8 text-slate-400">
-                <i class="fas fa-inbox text-3xl mb-2"></i>
+                <span class="material-symbols-outlined text-4xl mb-2">inbox</span>
                 <p class="text-sm">Tidak ada tugas</p>
               </div>
             {/if}
@@ -772,7 +923,7 @@
         <!-- Task Breakdown Chart -->
         <div class="card p-4 sm:p-6">
           <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
-            <i class="fas fa-chart-pie text-violet-500"></i> Status Tugas
+            <span class="material-symbols-outlined text-violet-500">pie_chart</span> Status Tugas
           </h3>
           <div class="h-[200px]">
             <canvas id="taskProgressChart"></canvas>
@@ -782,7 +933,7 @@
         <!-- Weekly Attendance -->
         <div class="card p-4 sm:p-6">
           <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
-            <i class="fas fa-calendar-week text-indigo-500"></i> Presensi Minggu Ini
+            <span class="material-symbols-outlined text-indigo-500">date_range</span> Presensi Minggu Ini
           </h3>
           <div class="h-[200px]">
             <canvas id="weeklyAttendanceChart"></canvas>
@@ -792,7 +943,7 @@
         <!-- Attendance Percentage -->
         <div class="card p-4 sm:p-6">
           <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
-            <i class="fas fa-percent text-emerald-500"></i> Kehadiran (30 Hari)
+            <span class="material-symbols-outlined text-emerald-500">percent</span> Kehadiran (30 Hari)
           </h3>
           <div class="text-center">
             <div class="text-5xl font-black text-slate-800 mb-2">
