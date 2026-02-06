@@ -1,0 +1,39 @@
+# .air.toml
+# Configuration for air hot reloader
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+# The command to build the Go application.
+# It specifies the entry point and the output binary location.
+cmd = "go build -o ./tmp/main ./cmd/server/main.go"
+
+# The path to the generated binary, relative to the root.
+bin = "tmp/main"
+
+# File extensions to watch for changes. Air will rebuild when these files change.
+include_ext = ["go", "toml", "env"]
+
+# Directories to exclude from watching.
+# Prevents unnecessary rebuilds from logs, uploads, etc.
+exclude_dir = ["tmp", "uploads", "vendor"]
+
+# Only watch for changes in these directories.
+# This focuses air on your source code.
+include_dir = ["cmd", "internal", "database"]
+
+[log]
+# Display timestamps in the logs.
+time = true
+
+[color]
+# Customize colors for different parts of the output.
+main = "magenta"
+watcher = "cyan"
+build = "yellow"
+runner = "green"
+
+[misc]
+# Delete the tmp directory on exit for a clean shutdown.
+clean_on_exit = true
