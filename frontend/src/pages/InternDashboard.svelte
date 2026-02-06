@@ -1,41 +1,48 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { api } from '../lib/api.js';
   import { auth } from '../lib/auth.svelte.js';
   import Chart from 'chart.js/auto';
   import L from 'leaflet';
-
-
-
   
-  
-  // Office Configuration
-  const OFFICE = {
+  // Office Configuration - This should match backend config
+  const OFFICE = $state({
     lat: -7.0355,
     lng: 110.4746,
     name: 'PT. DUTA SOLUSI INFORMATIKA',
     maxDistance: 1000 // meters
-  };
+  });
 
-  // State
+  // ==================== STATE ====================
   let loading = $state(true);
+  let dashboardLoading = $state(false);
+  
+  // Attendance State
   let todayAttendance = $state(null);
-  let gpsStatus = $state('loading');
+  let gpsStatus = $state('loading'); // loading, ready, error, denied
   let gps = $state({ lat: null, lng: null, error: null });
+  let checkingIn = $state(false);
+  let checkingOut = $state(false);
+  
+  // Map State
   let map = $state(null);
   let userMarker = $state(null);
   let officeMarker = $state(null);
+  let radiusCircle = $state(null);
   
   // Dashboard Data
   let dashboardData = $state({
     totalTasks: 0,
     pendingTasks: 0,
     completedTasks: 0,
+    inProgressTasks: 0,
     taskStats: { pending: 0, in_progress: 0, submitted: 0, completed: 0, revision: 0 },
     taskBreakdown: { pending: 0, in_progress: 0, submitted: 0, completed: 0, revision: 0 },
     recentTasks: [],
     weeklyAttendance: { days: [], counts: [], colors: [] },
-    attendancePercentage: 0
+    attendancePercentage: 0,
+    attendanceHistory: [],
+    office: null
   });
 
   // Modals
@@ -48,36 +55,55 @@
     document: null
   });
 
-  // Check-in state
-  let checkingIn = $state(false);
-
   // Charts
   let taskProgressChart = null;
   let weeklyAttendanceChart = null;
+  let watchId = null;
 
-  // Calculated distance
+  // ==================== DERIVED STATE ====================
+  
+  // Calculate distance from office
   const distance = $derived(
     gps.lat && gps.lng 
       ? Math.round(getDistance(gps.lat, gps.lng, OFFICE.lat, OFFICE.lng))
       : null
   );
 
-// 2. Update canCheckIn to be strictly dependent on data existence
-const canCheckIn = $derived(
-  !loading &&
-  gpsStatus === 'ready' &&
-  distance !== null &&
-  distance <= OFFICE.maxDistance &&
-  todayAttendance === null // Strictly null
-);
+  // Check if user can check in
+  const canCheckIn = $derived(
+    !loading &&
+    !checkingIn &&
+    gpsStatus === 'ready' &&
+    distance !== null &&
+    distance <= OFFICE.maxDistance &&
+    todayAttendance === null
+  );
+  
+  // Check if user can check out
+  const canCheckOut = $derived(
+    !loading &&
+    !checkingOut &&
+    todayAttendance !== null &&
+    todayAttendance.checked_in === true &&
+    todayAttendance.checked_out === false &&
+    !['permission', 'sick'].includes(todayAttendance.status)
+  );
 
+  // Check if user is late
   const isLate = $derived(() => {
     const now = new Date();
     const hour = now.getHours();
     const minute = now.getMinutes();
-    return (hour > 8) || (hour === 8 && minute > 0); // Late after 08:00
+    return (hour > 8) || (hour === 8 && minute > 0);
   });
 
+  // Attendance completion status
+  const attendanceComplete = $derived(
+    todayAttendance !== null && 
+    (todayAttendance.checked_out === true || ['permission', 'sick'].includes(todayAttendance.status))
+  );
+
+  // ==================== GEOLOCATION ====================
   
   // Haversine formula for distance calculation
   function getDistance(lat1, lon1, lat2, lon2) {
@@ -93,40 +119,79 @@ const canCheckIn = $derived(
     return R * c;
   }
 
-  // Fetch dashboard data
-  async function fetchDashboardData() {
-    loading = true;
-    try {
-      const res = await api.getInternDashboard();
-      const data = res.data;
-      
-      todayAttendance = data.today_attendance || null;
+  // Initialize geolocation tracking
+  function initGeolocation() {
+    if (!navigator.geolocation) {
+      gpsStatus = 'error';
+      gps.error = 'Geolocation not supported';
+      return;
+    }
 
-      dashboardData = {
-        totalTasks: data.task_stats.total,
-        pendingTasks: data.task_stats.pending,
-        completedTasks: data.task_stats.completed,
-        taskStats: data.task_breakdown,
-        taskBreakdown: data.task_breakdown,
-        recentTasks: data.recent_tasks || [],
-        weeklyAttendance: {
-          days: data.weekly_attendance_counts.labels,
-          counts: data.weekly_attendance_counts.data,
-          colors: data.weekly_attendance_counts.colors
-        },
-        attendancePercentage: data.attendance_percentage
-      };
+    // Get initial position
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        gps = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          error: null
+        };
+        gpsStatus = 'ready';
+        updateMapPosition();
+      },
+      (error) => {
+        console.error('Geolocation error:', error);
+        gpsStatus = error.code === 1 ? 'denied' : 'error';
+        gps.error = error.message;
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
 
-      // Initialize charts
-      setTimeout(initCharts, 100);
-    } catch (err) {
-      console.error('Failed to fetch dashboard data:', err);
-    } finally {
-      loading = false;
+    // Watch position for continuous updates
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        gps = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          error: null
+        };
+        if (gpsStatus !== 'ready') gpsStatus = 'ready';
+        updateMapPosition();
+      },
+      (error) => {
+        console.error('Watch position error:', error);
+      },
+      { enableHighAccuracy: true, maximumAge: 30000 }
+    );
+  }
+
+  // Update user marker position on map
+  function updateMapPosition() {
+    if (!map || !gps.lat || !gps.lng) return;
+
+    /** @type {[number, number]} */
+    const userPos = [gps.lat, gps.lng];
+
+    if (userMarker) {
+      userMarker.setLatLng(userPos);
+    } else {
+      userMarker = L.marker(userPos, {
+        icon: L.divIcon({
+          className: 'user-marker',
+          html: '<div style="background:#10b981; width:24px; height:24px; border-radius:50%; border:3px solid white; box-shadow:0 2px 8px rgba(0,0,0,0.3); animation: pulse 2s infinite;"></div>',
+          iconSize: [24, 24]
+        })
+      }).addTo(map);
+    }
+
+    // Center map on user if far from view
+    const bounds = map.getBounds();
+    if (!bounds.contains(userPos)) {
+      map.setView(userPos, 15);
     }
   }
 
-  // Initialize Leaflet map
+  // ==================== MAP INITIALIZATION ====================
+  
   function initMap() {
     if (typeof window === 'undefined' || !window.L) return;
     
@@ -137,183 +202,113 @@ const canCheckIn = $derived(
     const mapElement = document.getElementById('map');
     if (!mapElement) return;
 
-    map = window.L.map('map').setView([OFFICE.lat, OFFICE.lng], 15);
+    // Initialize map centered on office
+    map = L.map('map').setView([OFFICE.lat, OFFICE.lng], 15);
 
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
     // Office marker
-    officeMarker = window.L.marker([OFFICE.lat, OFFICE.lng], {
-      icon: window.L.divIcon({
+    officeMarker = L.marker([OFFICE.lat, OFFICE.lng], {
+      icon: L.divIcon({
         className: 'office-marker',
         html: '<div style="background:#6366f1; width:32px; height:32px; border-radius:50%; border:4px solid white; box-shadow:0 2px 8px rgba(0,0,0,0.3);"></div>',
         iconSize: [32, 32]
       })
     }).addTo(map).bindPopup(OFFICE.name);
 
-    // Circle showing check-in range
-    window.L.circle([OFFICE.lat, OFFICE.lng], {
+    // Office radius circle
+    radiusCircle = L.circle([OFFICE.lat, OFFICE.lng], {
       color: '#6366f1',
       fillColor: '#6366f1',
       fillOpacity: 0.1,
       radius: OFFICE.maxDistance
     }).addTo(map);
+
+    setTimeout(() => map.invalidateSize(), 100);
   }
 
-  // Update user location on map
-  function updateUserLocation() {
-    if (!map || !gps.lat || !gps.lng) return;
-
-    if (userMarker) {
-      userMarker.setLatLng([gps.lat, gps.lng]);
-    } else {
-      userMarker = window.L.marker([gps.lat, gps.lng], {
-        icon: window.L.divIcon({
-          className: 'user-marker',
-          html: '<div style="background:#10b981; width:20px; height:20px; border-radius:50%; border:3px solid white; box-shadow:0 2px 8px rgba(0,0,0,0.3);"></div>',
-          iconSize: [20, 20]
-        })
-      }).addTo(map).bindPopup('Lokasi Anda');
-    }
-
-    map.setView([gps.lat, gps.lng], 16);
-  }
-
-  // Initialize GPS tracking
-  function initGPS() {
-    if (!navigator.geolocation) {
-      gpsStatus = 'error';
-      gps.error = 'GPS tidak didukung di browser ini';
-      return;
-    }
-
-    gpsStatus = 'loading';
-    
-    navigator.geolocation.watchPosition(
-      (position) => {
-        gps.lat = position.coords.latitude;
-        gps.lng = position.coords.longitude;
-        gps.error = null;
-        gpsStatus = 'ready';
-        updateUserLocation();
-      },
-      (error) => {
-        gps.error = error.message;
-        gpsStatus = 'error';
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 10000
-      }
-    );
-  }
-
-  // Handle check-in
-  async function handleCheckIn() {
-    if (!canCheckIn) return;
-    
-    // Check if late
-    if (isLate()) {
-      showLateModal = true;
-      return;
-    }
-
-    await performCheckIn();
-  }
-
-  async function performCheckIn(reason = null) {
-    checkingIn = true;
+  // ==================== DATA FETCHING ====================
+  
+  async function fetchDashboardData() {
+    dashboardLoading = true;
     try {
-      const result = await api.checkIn(gps.lat, gps.lng, reason);
-      todayAttendance = result.data;
-      showLateModal = false;
-      lateReason = '';
-    } catch (err) {
-      console.error('Check-in failed:', err);
-      alert('Gagal check-in: ' + (err.message || 'Unknown error'));
-    } finally {
-      checkingIn = false;
-    }
-  }
+      const res = await api.getInternDashboardData();
+      const data = res.data;
+      
+      // Parse today's attendance
+      todayAttendance = data.today_attendance?.checked_in ? data.today_attendance : null;
 
-  async function handleCheckOut() {
-    if (!todayAttendance || todayAttendance.check_out_time) return;
-
-    if (!gps.lat || !gps.lng) {
-      alert('Lokasi GPS belum siap');
-      return;
-    }
-
-    checkingIn = true;
-    try {
-      const result = await api.checkOut(gps.lat, gps.lng);
-      todayAttendance = result.data;
-    } catch (err) {
-      console.error('Check-out failed:', err);
-      alert('Gagal check-out: ' + (err.message || 'Unknown error'));
-    } finally {
-      checkingIn = false;
-    }
-  }
-
-  function submitLateReason() {
-    if (!lateReason.trim()) {
-      alert('Mohon isi alasan keterlambatan!');
-      return;
-    }
-    performCheckIn(lateReason);
-  }
-
-  async function submitPermission() {
-    try {
-      const payload = {
-        type: permissionForm.type,
-        reason: permissionForm.reason,
-        document: permissionForm.document,
-        latitude: gps.lat,
-        longitude: gps.lng
+      // Parse dashboard data
+      dashboardData = {
+        totalTasks: data.task_stats?.total || 0,
+        pendingTasks: data.task_stats?.pending || 0,
+        completedTasks: data.task_stats?.completed || 0,
+        inProgressTasks: data.task_stats?.in_progress || 0,
+        taskStats: data.task_stats || {},
+        taskBreakdown: data.task_breakdown || {},
+        recentTasks: data.recent_tasks || [],
+        weeklyAttendance: {
+          days: data.weekly_attendance_counts?.labels || [],
+          counts: data.weekly_attendance_counts?.data || [],
+          colors: data.weekly_attendance_counts?.colors || []
+        },
+        attendancePercentage: data.attendance_percentage || 0,
+        attendanceHistory: data.attendance_history || [],
+        office: data.office || null
       };
-      
-      await api.submitPermission(payload);
-      showPermissionModal = false;
-      permissionForm = { type: 'permission', reason: '', document: null };
-      await fetchDashboardData();
+
+      // Override OFFICE config if backend provides it
+      if (data.office?.latitude && data.office?.longitude) {
+        OFFICE.lat = data.office.latitude;
+        OFFICE.lng = data.office.longitude;
+        OFFICE.maxDistance = data.office.radius || 1000;
+        OFFICE.name = data.office.name || OFFICE.name;
+      }
+
+      // Initialize charts after data is loaded
+      setTimeout(initCharts, 100);
     } catch (err) {
-      console.error('Permission submission failed:', err);
-      alert('Gagal mengajukan izin: ' + (err.message || 'Unknown error'));
+      console.error('Failed to fetch dashboard data:', err);
+    } finally {
+      dashboardLoading = false;
     }
   }
 
-  function handleFileChange(e) {
-    const file = e.target.files?.[0];
-    if (file) {
-      permissionForm.document = file;
-    }
-  }
-
-  // Initialize charts
+  // ==================== CHART INITIALIZATION ====================
+  
   function initCharts() {
-    // Task Progress Donut Chart
-    const taskProgressCtx = document.getElementById('taskProgressChart');
-    if (taskProgressCtx && taskProgressCtx instanceof HTMLCanvasElement) {
-      if (taskProgressChart) taskProgressChart.destroy();
+    // Destroy existing charts
+    if (taskProgressChart) taskProgressChart.destroy();
+    if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
+
+    // Task Progress Pie Chart
+    const taskCanvas = document.getElementById('taskProgressChart');
+    if (taskCanvas instanceof HTMLCanvasElement && dashboardData.taskBreakdown) {
+      const ctx = taskCanvas.getContext('2d');
+      const breakdown = dashboardData.taskBreakdown;
       
-      taskProgressChart = new Chart(taskProgressCtx.getContext('2d'), {
+      taskProgressChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-          labels: ['Pending', 'Proses', 'Submitted', 'Completed', 'Revisi'],
+          labels: ['Pending', 'In Progress', 'Submitted', 'Completed', 'Revision'],
           datasets: [{
             data: [
-              dashboardData.taskBreakdown.pending,
-              dashboardData.taskBreakdown.in_progress,
-              dashboardData.taskBreakdown.submitted,
-              dashboardData.taskBreakdown.completed,
-              dashboardData.taskBreakdown.revision
+              breakdown.pending || 0,
+              breakdown.in_progress || 0,
+              breakdown.submitted || 0,
+              breakdown.completed || 0,
+              breakdown.revision || 0
             ],
-            backgroundColor: ['#fbbf24', '#6366f1', '#a855f7', '#10b981', '#f43f5e'],
-            borderWidth: 0,
-            hoverOffset: 4
+            backgroundColor: [
+              '#f59e0b', // amber
+              '#6366f1', // indigo
+              '#8b5cf6', // violet
+              '#10b981', // emerald
+              '#ef4444'  // red
+            ],
+            borderWidth: 0
           }]
         },
         options: {
@@ -321,45 +316,49 @@ const canCheckIn = $derived(
           maintainAspectRatio: false,
           plugins: {
             legend: {
-              position: 'right',
+              position: 'bottom',
               labels: {
+                padding: 12,
+                font: { size: 11, weight: 600 },
                 usePointStyle: true,
-                pointStyle: 'circle',
-                boxWidth: 6,
-                font: { size: 10, family: 'Inter' }
+                pointStyle: 'circle'
               }
             }
-          },
-          cutout: '70%'
+          }
         }
       });
     }
 
     // Weekly Attendance Bar Chart
-    const weeklyAttendanceCtx = document.getElementById('weeklyAttendanceChart');
-    if (weeklyAttendanceCtx && weeklyAttendanceCtx instanceof HTMLCanvasElement) {
-      if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
+    const weeklyCanvas = document.getElementById('weeklyAttendanceChart');
+    if (weeklyCanvas instanceof HTMLCanvasElement && dashboardData.weeklyAttendance?.days?.length) {
+      const ctx = weeklyCanvas.getContext('2d');
+      const weekly = dashboardData.weeklyAttendance;
       
-      weeklyAttendanceChart = new Chart(weeklyAttendanceCtx.getContext('2d'), {
+      weeklyAttendanceChart = new Chart(ctx, {
         type: 'bar',
         data: {
-          labels: dashboardData.weeklyAttendance.days,
+          labels: weekly.days,
           datasets: [{
-            label: 'Status',
-            data: dashboardData.weeklyAttendance.counts,
-            backgroundColor: dashboardData.weeklyAttendance.colors,
-            borderRadius: 4,
-            barThickness: 16
+            label: 'Attendance',
+            data: weekly.counts,
+            backgroundColor: weekly.colors,
+            borderRadius: 6,
+            barThickness: 24
           }]
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           scales: {
-            y: { beginAtZero: true, display: false },
+            y: {
+              beginAtZero: true,
+              ticks: { stepSize: 1, font: { size: 10 } },
+              grid: { display: false }
+            },
             x: {
               grid: { display: false },
-              ticks: { font: { size: 10 } }
+              ticks: { font: { size: 11, weight: 600 } }
             }
           },
           plugins: {
@@ -370,89 +369,173 @@ const canCheckIn = $derived(
     }
   }
 
-  function formatTime(timeStr) {
-    if (!timeStr) return '-';
-    if (timeStr.includes('T')) {
-      return new Date(timeStr).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  // ==================== ATTENDANCE ACTIONS ====================
+  
+  async function handleCheckIn() {
+    if (!canCheckIn) return;
+
+    // Check if late and show modal
+    if (isLate() && !showLateModal) {
+      showLateModal = true;
+      return;
     }
-    return timeStr;
+
+    checkingIn = true;
+    try {
+      const payload = {
+        latitude: gps.lat,
+        longitude: gps.lng
+      };
+      
+      if (lateReason && lateReason.trim()) {
+        payload.reason = lateReason.trim();
+      }
+
+      const res = await api.checkIn(gps.lat, gps.lng, lateReason || null);
+      
+      if (res.success !== false) {
+        // Refresh dashboard data to get updated attendance
+        await fetchDashboardData();
+        showLateModal = false;
+        lateReason = '';
+      }
+    } catch (err) {
+      console.error('Check-in failed:', err);
+      alert(err.message || 'Check-in failed');
+    } finally {
+      checkingIn = false;
+    }
   }
 
-  function getChartColor(status) {
-    switch (status) {
-      case 'present': return '#10b981';
-      case 'late': return '#f59e0b';
-      case 'permission': return '#3b82f6';
-      case 'sick': return '#a855f7';
-      case 'absent': return '#ef4444';
-      default: return '#cbd5e1';
+  async function handleCheckOut() {
+    if (!canCheckOut) return;
+    
+    if (!confirm('Konfirmasi check-out?')) return;
+
+    checkingOut = true;
+    try {
+      await api.checkOut(gps.lat || 0, gps.lng || 0);
+      await fetchDashboardData();
+    } catch (err) {
+      console.error('Check-out failed:', err);
+      alert(err.message || 'Check-out failed');
+    } finally {
+      checkingOut = false;
     }
   }
 
-  function getPriorityColor(priority) {
-    switch (priority) {
-      case 'high': return 'bg-rose-100 text-rose-800 border-rose-200';
-      case 'medium': return 'bg-amber-100 text-amber-800 border-amber-200';
-      default: return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+  async function handlePermissionSubmit() {
+    if (!permissionForm.reason?.trim()) {
+      alert('Please provide a reason');
+      return;
+    }
+
+    try {
+      await api.submitPermission(permissionForm);
+      showPermissionModal = false;
+      permissionForm = { type: 'permission', reason: '', document: null };
+      await fetchDashboardData();
+    } catch (err) {
+      console.error('Permission submission failed:', err);
+      alert(err.message || 'Submission failed');
     }
   }
 
-  function getStatusColor(status) {
-    switch (status) {
-      case 'completed': return 'bg-emerald-100 text-emerald-700';
-      case 'in_progress': return 'bg-indigo-100 text-indigo-700';
-      case 'submitted': return 'bg-purple-100 text-purple-700';
-      case 'revision': return 'bg-rose-100 text-rose-700';
-      default: return 'bg-amber-100 text-amber-700';
+  function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    if (file) {
+      permissionForm.document = file;
     }
+  }
+
+  // ==================== LIFECYCLE ====================
+  
+  onMount(async () => {
+    loading = true;
+    
+    // Initialize map first
+    initMap();
+    
+    // Start geolocation
+    initGeolocation();
+    
+    // Fetch dashboard data
+    await fetchDashboardData();
+    
+    loading = false;
+  });
+
+  onDestroy(() => {
+    // Cleanup
+    if (watchId) {
+      navigator.geolocation.clearWatch(watchId);
+    }
+    if (map) {
+      map.remove();
+    }
+    if (taskProgressChart) taskProgressChart.destroy();
+    if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
+  });
+
+  // ==================== UTILITIES ====================
+  
+  function getStatusBadgeClass(status) {
+    const classes = {
+      pending: 'bg-amber-50 text-amber-700 border-amber-200',
+      in_progress: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      submitted: 'bg-violet-50 text-violet-700 border-violet-200',
+      completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      revision: 'bg-red-50 text-red-700 border-red-200'
+    };
+    return classes[status] || 'bg-slate-50 text-slate-700 border-slate-200';
   }
 
   function getStatusLabel(status) {
-    switch (status) {
-      case 'pending': return 'Pending';
-      case 'in_progress': return 'Dalam Proses';
-      case 'submitted': return 'Submitted';
-      case 'completed': return 'Selesai';
-      case 'revision': return 'Revisi';
-      default: return status;
-    }
+    const labels = {
+      pending: 'Pending',
+      in_progress: 'In Progress',
+      submitted: 'Submitted',
+      completed: 'Completed',
+      revision: 'Revision'
+    };
+    return labels[status] || status;
   }
 
-  onMount(() => {
-    // Load Leaflet CSS and JS
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
-    link.crossOrigin = '';
-    document.head.appendChild(link);
-
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
-    script.crossOrigin = '';
-    script.onload = () => {
-      initMap();
-      initGPS();
-    };
-    document.head.appendChild(script);
-
-    fetchDashboardData();
-
-    return () => {
-      if (map) map.remove();
-      if (taskProgressChart) taskProgressChart.destroy();
-      if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
-    };
-  });
+  function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
 </script>
+
+<svelte:head>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+</svelte:head>
+
+<style>
+  :global(.user-marker), :global(.office-marker) {
+    z-index: 1000 !important;
+  }
+  
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.8; }
+  }
+  
+  .stat-card, .card {
+    background: rgba(255, 255, 255, 0.85) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+</style>
 
 <div class="slide-up max-w-[1600px] mx-auto space-y-6">
   <!-- Header -->
   <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
     <div>
       <h2 class="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight mb-1">
-        Selamat datang kembali! {auth.user?.name}
+        Selamat datang kembali, {auth.user?.name || 'User'}!
       </h2>
       <p class="text-slate-500 font-medium text-sm sm:text-base">
         Berikut ringkasan aktivitas magang Anda.
@@ -460,267 +543,289 @@ const canCheckIn = $derived(
     </div>
     <div class="text-right hidden sm:block">
       <div class="text-sm font-semibold text-slate-600">
-        {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+        {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
       </div>
     </div>
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- LEFT COLUMN (2/3) -->
-    <div class="lg:col-span-2 space-y-6">
-      <!-- ATTENDANCE CARD -->
-      <div class="card p-0 overflow-hidden">
-        <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-          <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-500">
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-              <circle cx="12" cy="10" r="3"/>
-            </svg>
-            Presensi Harian
-          </h3>
-          <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold {gpsStatus === 'ready' ? 'bg-emerald-100 text-emerald-700' : gpsStatus === 'error' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}">
-            <div class="w-1.5 h-1.5 rounded-full {gpsStatus === 'ready' ? 'bg-emerald-500' : gpsStatus === 'error' ? 'bg-rose-500' : 'bg-slate-400'} mr-1.5 {gpsStatus === 'loading' ? 'animate-pulse' : ''}"></div>
-            {gpsStatus === 'ready' ? 'GPS Aktif' : gpsStatus === 'error' ? 'GPS Error' : 'Mencari Lokasi...'}
+  {#if loading}
+    <div class="text-center py-12">
+      <div class="inline-block w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+      <p class="mt-4 text-slate-600">Loading dashboard...</p>
+    </div>
+  {:else}
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- LEFT COLUMN (2/3) -->
+      <div class="lg:col-span-2 space-y-6">
+        
+        <!-- ATTENDANCE CARD -->
+        <div class="card p-0 overflow-hidden">
+          <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+              <i class="fas fa-map-marked-alt text-indigo-500"></i> Presensi Harian
+            </h3>
+            <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold"
+                 class:bg-emerald-100={gpsStatus === 'ready'}
+                 class:text-emerald-700={gpsStatus === 'ready'}
+                 class:bg-slate-100={gpsStatus === 'loading'}
+                 class:text-slate-500={gpsStatus === 'loading'}
+                 class:bg-red-100={gpsStatus === 'error' || gpsStatus === 'denied'}
+                 class:text-red-700={gpsStatus === 'error' || gpsStatus === 'denied'}>
+              <div class="w-1.5 h-1.5 rounded-full mr-1.5"
+                   class:bg-emerald-500={gpsStatus === 'ready'}
+                   class:bg-slate-400={gpsStatus === 'loading'}
+                   class:bg-red-500={gpsStatus === 'error' || gpsStatus === 'denied'}
+                   class:animate-pulse={gpsStatus === 'loading'}></div>
+              {#if gpsStatus === 'ready'}GPS Ready
+              {:else if gpsStatus === 'loading'}Mencari Lokasi...
+              {:else if gpsStatus === 'denied'}GPS Denied
+              {:else}GPS Error{/if}
+            </div>
+          </div>
+
+          <div class="p-4 sm:p-6 space-y-4">
+            <!-- Map -->
+            <div class="relative h-[220px] sm:h-[300px] w-full rounded-xl overflow-hidden border border-slate-200 shadow-inner">
+              <div id="map" class="h-full w-full z-0"></div>
+            </div>
+
+            <!-- Office Info & Distance -->
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+              <span class="text-sm font-medium text-slate-600 flex items-center gap-2">
+                <i class="fas fa-building text-slate-400"></i> Kantor: 
+                <span class="font-bold text-slate-800">{OFFICE.name}</span>
+              </span>
+              <span class="text-sm font-medium text-slate-600">
+                Jarak: <span class="font-mono font-bold" 
+                            class:text-emerald-600={distance !== null && distance <= OFFICE.maxDistance}
+                            class:text-red-600={distance !== null && distance > OFFICE.maxDistance}
+                            class:text-slate-800={distance === null}>
+                  {distance !== null ? `${distance} m` : '-- m'}
+                </span>
+              </span>
+            </div>
+
+            <!-- Action Buttons -->
+            <div>
+              {#if attendanceComplete}
+                <!-- Attendance Completed -->
+                <div class="text-center p-6 bg-emerald-50/50 border border-emerald-100 rounded-xl">
+                  <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 shadow-sm">
+                    <i class="fas fa-check"></i>
+                  </div>
+                  <h4 class="font-bold text-emerald-800 text-lg">Selesai Hari Ini</h4>
+                  <p class="text-emerald-600 font-medium text-sm mt-1">
+                    Status: <span class="capitalize">{todayAttendance?.status || 'Completed'}</span>
+                  </p>
+                </div>
+              {:else if canCheckOut}
+                <!-- Show Check-In Time & Check-Out Button -->
+                <div class="text-center mb-4">
+                  <div class="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-50 text-emerald-700 font-medium text-sm border border-emerald-100">
+                    <i class="fas fa-check-circle mr-2"></i> Anda masuk pukul 
+                    <strong class="ml-1">{todayAttendance?.check_in_time || 'N/A'}</strong>
+                  </div>
+                </div>
+                <button
+                  onclick={handleCheckOut}
+                  disabled={checkingOut}
+                  class="btn w-full py-3.5 text-base font-bold bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                  {#if checkingOut}
+                    <span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                    Processing...
+                  {:else}
+                    <i class="fas fa-sign-out-alt mr-2"></i> PRESENSI KELUAR SEKARANG
+                  {/if}
+                </button>
+              {:else}
+                <!-- Check-In Button -->
+                <button
+                  onclick={handleCheckIn}
+                  disabled={!canCheckIn || checkingIn}
+                  class="btn w-full py-3.5 text-base font-bold shadow-lg shadow-indigo-500/20 transition-all"
+                  class:bg-indigo-600={canCheckIn}
+                  class:text-white={canCheckIn}
+                  class:hover:bg-indigo-700={canCheckIn}
+                  class:bg-slate-300={!canCheckIn}
+                  class:text-slate-500={!canCheckIn}
+                  class:cursor-not-allowed={!canCheckIn}
+                  class:opacity-50={!canCheckIn || checkingIn}>
+                  {#if checkingIn}
+                    <span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                    Processing...
+                  {:else if gpsStatus === 'loading'}
+                    <i class="fas fa-spinner fa-spin mr-2"></i> Menunggu GPS...
+                  {:else if gpsStatus === 'denied'}
+                    <i class="fas fa-exclamation-triangle mr-2"></i> GPS Ditolak
+                  {:else if gpsStatus === 'error'}
+                    <i class="fas fa-exclamation-circle mr-2"></i> GPS Error
+                  {:else if distance === null}
+                    <i class="fas fa-location-arrow mr-2"></i> Menunggu Lokasi...
+                  {:else if distance > OFFICE.maxDistance}
+                    <i class="fas fa-map-marker-alt mr-2"></i> Terlalu Jauh ({distance}m)
+                  {:else}
+                    <i class="fas fa-sign-in-alt mr-2"></i> PRESENSI MASUK SEKARANG
+                  {/if}
+                </button>
+
+                <!-- Permission Button -->
+                <button
+                  onclick={() => showPermissionModal = true}
+                  class="btn w-full mt-3 py-2.5 text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200">
+                  <i class="fas fa-file-medical mr-2"></i> Ajukan Izin/Sakit
+                </button>
+              {/if}
+            </div>
           </div>
         </div>
 
-        <div class="p-4 sm:p-6 space-y-4">
-          <!-- Map -->
-          <div class="relative h-[220px] sm:h-[300px] w-full rounded-xl overflow-hidden border border-slate-200 shadow-inner">
-            <div id="map" class="h-full w-full z-0"></div>
+        <!-- TASKS CARD -->
+        <div class="card p-0 overflow-hidden">
+          <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+              <i class="fas fa-clipboard-list text-teal-500"></i> Tugas Saya
+            </h3>
+            <a href="/tasks" class="text-xs font-bold text-teal-600 hover:text-teal-700 uppercase tracking-wider hover:underline">
+              Lihat Semua
+            </a>
           </div>
 
-          <!-- Office Info -->
-          <div class="flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-            <span class="text-sm font-medium text-slate-600 flex items-center gap-2">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-400">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                <polyline points="9 22 9 12 15 12 15 22"/>
-              </svg>
-              Kantor: <span class="font-bold text-slate-800">{OFFICE.name}</span>
-            </span>
-            <span class="text-sm font-medium text-slate-600">
-              Jarak: <span class="font-mono font-bold text-slate-800">{distance !== null ? distance + ' m' : '-- m'}</span>
-            </span>
-          </div>
+          <div class="p-4 sm:p-6 space-y-6">
+            <!-- Task Stats -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+              <div class="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 text-center hover:bg-white hover:shadow-md transition-all">
+                <div class="text-2xl font-black text-slate-700">{dashboardData.totalTasks}</div>
+                <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Total</div>
+              </div>
+              <div class="bg-amber-50 p-3 sm:p-4 rounded-xl border border-amber-100 text-center hover:bg-white hover:shadow-md transition-all">
+                <div class="text-2xl font-black text-amber-600">{dashboardData.pendingTasks}</div>
+                <div class="text-[10px] font-bold text-amber-600/70 uppercase tracking-wider mt-1">Pending</div>
+              </div>
+              <div class="bg-indigo-50 p-3 sm:p-4 rounded-xl border border-indigo-100 text-center hover:bg-white hover:shadow-md transition-all">
+                <div class="text-2xl font-black text-indigo-600">{dashboardData.inProgressTasks}</div>
+                <div class="text-[10px] font-bold text-indigo-600/70 uppercase tracking-wider mt-1">Proses</div>
+              </div>
+              <div class="bg-emerald-50 p-3 sm:p-4 rounded-xl border border-emerald-100 text-center hover:bg-white hover:shadow-md transition-all">
+                <div class="text-2xl font-black text-emerald-600">{dashboardData.completedTasks}</div>
+                <div class="text-[10px] font-bold text-emerald-600/70 uppercase tracking-wider mt-1">Selesai</div>
+              </div>
+            </div>
 
-          <!-- Action Buttons -->
-          <div>
-            {#if loading}
-              <div class="text-center py-4">
-                <div class="inline-block w-6 h-6 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-              </div>
-            {:else if !todayAttendance}
-              <!-- Check-in Button -->
-              <button
-                onclick={handleCheckIn}
-                disabled={!canCheckIn || checkingIn}
-                class="btn w-full py-3.5 text-base font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 bg-indigo-600 text-white hover:bg-indigo-700 transition-all"
-              >
-                {#if checkingIn}
-                  <div class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                {/if}
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-2">
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                  <circle cx="12" cy="10" r="3"/>
-                </svg>
-                {canCheckIn ? 'PRESENSI MASUK SEKARANG' : (distance !== null ? (distance > OFFICE.maxDistance ? `TERLALU JAUH (${distance}m)` : 'Menunggu GPS...') : 'Menunggu GPS...')}
-              </button>
-            {:else if !todayAttendance.check_out_time && todayAttendance.status !== 'permission' && todayAttendance.status !== 'sick'}
-              <!-- Check-out Button -->
-              <div class="text-center mb-4">
-                <div class="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-50 text-emerald-700 font-medium text-sm border border-emerald-100">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-2">
-                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                    <polyline points="22 4 12 14.01 9 11.01"/>
-                  </svg>
-                  Anda masuk pukul <strong class="ml-1">{formatTime(todayAttendance.check_in_time)}</strong>
+            <!-- Progress Bar -->
+            {#if dashboardData.totalTasks > 0}
+              <div>
+                <div class="flex justify-between items-center mb-2">
+                  <span class="text-xs font-bold text-slate-600 uppercase tracking-wider">Progress</span>
+                  <span class="text-sm font-black text-slate-800">
+                    {Math.round((dashboardData.completedTasks / dashboardData.totalTasks) * 100)}%
+                  </span>
                 </div>
-              </div>
-              <button
-                onclick={handleCheckOut}
-                disabled={checkingIn}
-                class="btn w-full py-3.5 text-base font-bold bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50"
-              >
-                {#if checkingIn}
-                  <div class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                {/if}
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-2">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <polyline points="16 17 21 12 16 7"/>
-                  <line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
-                PRESENSI KELUAR SEKARANG
-              </button>
-            {:else}
-              <!-- Attendance Completed -->
-              <div class="text-center p-6 bg-emerald-50/50 border border-emerald-100 rounded-xl">
-                <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 shadow-sm">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
+                <div class="h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-500"
+                       style="width: {(dashboardData.completedTasks / dashboardData.totalTasks) * 100}%"></div>
                 </div>
-                <h4 class="font-bold text-emerald-800 text-lg">Selesai Hari Ini</h4>
-                <p class="text-emerald-600 font-medium text-sm mt-1">
-                  Status: <span class="capitalize">{todayAttendance.status}</span>
-                </p>
               </div>
             {/if}
-          </div>
 
-          <!-- Permission Link -->
-          {#if !todayAttendance}
-            <div class="text-center pt-2">
-              <button
-                onclick={() => showPermissionModal = true}
-                class="text-sm text-indigo-600 hover:text-indigo-700 font-semibold hover:underline"
-              >
-                Tidak bisa datang? Ajukan Izin/Sakit
-              </button>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <!-- TASKS CARD -->
-      <div class="card p-0 overflow-hidden">
-        <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-          <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-teal-500">
-              <path d="M9 11l3 3L22 4"/>
-              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-            </svg>
-            Tugas Saya
-          </h3>
-          <a href="/tasks" class="text-xs font-bold text-teal-600 hover:text-teal-700 uppercase tracking-wider hover:underline">
-            Lihat Semua
-          </a>
-        </div>
-
-        <div class="p-4 sm:p-6 space-y-6">
-          <!-- Task Progress Stats -->
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            <div class="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 text-center hover:bg-white hover:shadow-md transition-all">
-              <div class="text-2xl font-black text-slate-700">{dashboardData.totalTasks}</div>
-              <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Total</div>
-            </div>
-            <div class="bg-amber-50 p-3 sm:p-4 rounded-xl border border-amber-100 text-center hover:bg-white hover:shadow-md transition-all">
-              <div class="text-2xl font-black text-amber-600">{dashboardData.pendingTasks}</div>
-              <div class="text-[10px] font-bold text-amber-600/70 uppercase tracking-wider mt-1">Pending</div>
-            </div>
-            <div class="bg-indigo-50 p-3 sm:p-4 rounded-xl border border-indigo-100 text-center hover:bg-white hover:shadow-md transition-all">
-              <div class="text-2xl font-black text-indigo-600">{dashboardData.taskStats.in_progress}</div>
-              <div class="text-[10px] font-bold text-indigo-600/70 uppercase tracking-wider mt-1">Proses</div>
-            </div>
-            <div class="bg-emerald-50 p-3 sm:p-4 rounded-xl border border-emerald-100 text-center hover:bg-white hover:shadow-md transition-all">
-              <div class="text-2xl font-black text-emerald-600">{dashboardData.completedTasks}</div>
-              <div class="text-[10px] font-bold text-emerald-600/70 uppercase tracking-wider mt-1">Selesai</div>
-            </div>
-          </div>
-
-          <!-- Recent Tasks -->
-          <div class="space-y-3">
-            <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wider">Tugas Terbaru</h4>
-            {#if dashboardData.recentTasks.length > 0}
-              {#each dashboardData.recentTasks as task}
-                <div class="bg-white p-4 rounded-xl border border-slate-100 hover:border-slate-300 hover:shadow-md transition-all">
-                  <div class="flex items-start justify-between gap-3 mb-2">
-                    <h5 class="font-bold text-slate-800 text-sm flex-1">{task.title}</h5>
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold {getPriorityColor(task.priority)}">
-                      {task.priority}
-                    </span>
+            <!-- Recent Tasks -->
+            {#if dashboardData.recentTasks?.length > 0}
+              <div class="space-y-3">
+                <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Tugas Terbaru</h4>
+                {#each dashboardData.recentTasks as task}
+                  <div class="p-3 bg-slate-50 rounded-lg border border-slate-100 hover:shadow-sm transition-all">
+                    <div class="flex justify-between items-start mb-2">
+                      <h5 class="font-semibold text-slate-800 text-sm">{task.title}</h5>
+                      <span class="px-2 py-0.5 rounded text-[10px] font-bold border {getStatusBadgeClass(task.status)}">
+                        {getStatusLabel(task.status)}
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-3 text-xs text-slate-500">
+                      {#if task.deadline}
+                        <span><i class="fas fa-calendar-alt mr-1"></i>{formatDate(task.deadline)}</span>
+                      {/if}
+                      {#if task.priority}
+                        <span class="capitalize">
+                          <i class="fas fa-flag mr-1" 
+                             class:text-red-500={task.priority === 'high'}
+                             class:text-amber-500={task.priority === 'medium'}
+                             class:text-slate-400={task.priority === 'low'}></i>
+                          {task.priority}
+                        </span>
+                      {/if}
+                    </div>
                   </div>
-                  <p class="text-xs text-slate-500 mb-3 line-clamp-2">{task.description || 'Tidak ada deskripsi'}</p>
-                  <div class="flex items-center justify-between text-xs">
-                    <span class="inline-flex items-center px-2 py-0.5 rounded font-bold {getStatusColor(task.status)}">
-                      {getStatusLabel(task.status)}
-                    </span>
-                    <span class="text-slate-400 flex items-center gap-1">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                        <line x1="16" y1="2" x2="16" y2="6"/>
-                        <line x1="8" y1="2" x2="8" y2="6"/>
-                        <line x1="3" y1="10" x2="21" y2="10"/>
-                      </svg>
-                      {task.deadline || 'No deadline'}
-                    </span>
-                  </div>
-                </div>
-              {/each}
+                {/each}
+              </div>
             {:else}
               <div class="text-center py-8 text-slate-400">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 opacity-50">
-                  <path d="M9 11l3 3L22 4"/>
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-                </svg>
-                <p class="text-sm">Belum ada tugas</p>
+                <i class="fas fa-inbox text-3xl mb-2"></i>
+                <p class="text-sm">Tidak ada tugas</p>
               </div>
             {/if}
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- RIGHT COLUMN (1/3) -->
-    <div class="space-y-6">
-      <!-- Task Progress Chart -->
-      <div class="card p-0 overflow-hidden">
-        <div class="p-4 border-b border-slate-100 bg-slate-50/50">
-          <h3 class="font-bold text-base text-slate-800">Progress Tugas</h3>
-        </div>
-        <div class="p-4">
-          <div class="h-48">
+      <!-- RIGHT COLUMN (1/3) -->
+      <div class="space-y-6">
+        
+        <!-- Task Breakdown Chart -->
+        <div class="card p-4 sm:p-6">
+          <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
+            <i class="fas fa-chart-pie text-violet-500"></i> Status Tugas
+          </h3>
+          <div class="h-[200px]">
             <canvas id="taskProgressChart"></canvas>
           </div>
         </div>
-      </div>
 
-      <!-- Weekly Attendance Chart -->
-      <div class="card p-0 overflow-hidden">
-        <div class="p-4 border-b border-slate-100 bg-slate-50/50">
-          <h3 class="font-bold text-base text-slate-800">Kehadiran Mingguan</h3>
-        </div>
-        <div class="p-4">
-          <div class="h-32">
+        <!-- Weekly Attendance -->
+        <div class="card p-4 sm:p-6">
+          <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
+            <i class="fas fa-calendar-week text-indigo-500"></i> Presensi Minggu Ini
+          </h3>
+          <div class="h-[200px]">
             <canvas id="weeklyAttendanceChart"></canvas>
           </div>
         </div>
-      </div>
 
-      <!-- Attendance Percentage -->
-      <div class="card">
-        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Persentase Kehadiran</h4>
-        <div class="text-4xl font-black text-slate-800 mb-2">{dashboardData.attendancePercentage}%</div>
-        <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-          <div class="bg-gradient-to-r from-emerald-500 to-teal-500 h-full rounded-full transition-all" style="width: {dashboardData.attendancePercentage}%"></div>
+        <!-- Attendance Percentage -->
+        <div class="card p-4 sm:p-6">
+          <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
+            <i class="fas fa-percent text-emerald-500"></i> Kehadiran (30 Hari)
+          </h3>
+          <div class="text-center">
+            <div class="text-5xl font-black text-slate-800 mb-2">
+              {dashboardData.attendancePercentage}%
+            </div>
+            <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-500"
+                   style="width: {dashboardData.attendancePercentage}%"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-  </div>
+  {/if}
 </div>
 
 <!-- Late Reason Modal -->
 {#if showLateModal}
-  <div 
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" 
-    role="button" 
-    tabindex="0" 
-    onclick={(e) => { if (e.target === e.currentTarget) showLateModal = false; }} 
-    onkeydown={(e) => { if (e.key === 'Escape') showLateModal = false; }}
-  >
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" role="document">
-      <h3 class="text-lg font-bold text-slate-800 mb-4">Alasan Terlambat</h3>
-      <p class="text-sm text-slate-600 mb-4">Anda terlambat hari ini. Mohon isi alasan keterlambatan Anda.</p>
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onclick={(e) => e.target === e.currentTarget && (showLateModal = false)}>
+    <div class="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+      <h3 class="text-xl font-bold text-slate-800 mb-4">Alasan Terlambat</h3>
+      <p class="text-sm text-slate-600 mb-4">Anda terlambat. Mohon berikan alasan:</p>
       <textarea
         bind:value={lateReason}
-        class="w-full px-4 py-3 border border-slate-200 rounded-lg resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-        rows="4"
-        placeholder="Contoh: Terlambat karena macet..."
-      ></textarea>
+        placeholder="Tulis alasan..."
+        class="w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+        rows="3"></textarea>
       <div class="flex gap-3 mt-4">
-        <button onclick={() => showLateModal = false} class="btn btn-outline flex-1">Batal</button>
-        <button onclick={submitLateReason} class="btn btn-primary flex-1" disabled={checkingIn}>
-          {checkingIn ? 'Mengirim...' : 'Kirim & Check In'}
+        <button onclick={() => showLateModal = false} class="btn flex-1 bg-slate-100 text-slate-700 hover:bg-slate-200">
+          Batal
+        </button>
+        <button onclick={handleCheckIn} class="btn flex-1 bg-indigo-600 text-white hover:bg-indigo-700">
+          Lanjutkan Check-In
         </button>
       </div>
     </div>
@@ -729,76 +834,47 @@ const canCheckIn = $derived(
 
 <!-- Permission Modal -->
 {#if showPermissionModal}
-  <div 
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" 
-    role="button" 
-    tabindex="0" 
-    onclick={(e) => { if (e.target === e.currentTarget) showPermissionModal = false; }} 
-    onkeydown={(e) => { if (e.key === 'Escape') showPermissionModal = false; }}
-  >
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" role="document">
-      <h3 class="text-lg font-bold text-slate-800 mb-4">Ajukan Izin/Sakit</h3>
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onclick={(e) => e.target === e.currentTarget && (showPermissionModal = false)}>
+    <div class="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+      <h3 class="text-xl font-bold text-slate-800 mb-4">Ajukan Izin/Sakit</h3>
       
       <div class="space-y-4">
         <div>
-          <label for="permission-type" class="block text-sm font-semibold text-slate-700 mb-2">Tipe</label>
-          <select id="permission-type" bind:value={permissionForm.type} class="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+          <label class="block text-sm font-semibold text-slate-700 mb-2">Jenis</label>
+          <select bind:value={permissionForm.type} class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500">
             <option value="permission">Izin</option>
             <option value="sick">Sakit</option>
           </select>
         </div>
 
         <div>
-          <label for="permission-reason" class="block text-sm font-semibold text-slate-700 mb-2">Alasan</label>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">Alasan</label>
           <textarea
-            id="permission-reason"
             bind:value={permissionForm.reason}
-            class="w-full px-4 py-3 border border-slate-200 rounded-lg resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            rows="4"
-            placeholder="Jelaskan alasan Anda..."
-          ></textarea>
+            placeholder="Jelaskan alasan..."
+            class="w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 resize-none"
+            rows="3"></textarea>
         </div>
 
         <div>
-          <label for="permission-doc" class="block text-sm font-semibold text-slate-700 mb-2">Dokumen Pendukung (Opsional)</label>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">Dokumen Pendukung (Opsional)</label>
           <input
-            id="permission-doc"
             type="file"
             accept="image/*,.pdf"
             onchange={handleFileChange}
-            class="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-          />
+            class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500" />
         </div>
       </div>
 
       <div class="flex gap-3 mt-6">
-        <button onclick={() => showPermissionModal = false} class="btn btn-outline flex-1">Batal</button>
-        <button onclick={submitPermission} class="btn btn-primary flex-1">Kirim</button>
+        <button onclick={() => { showPermissionModal = false; permissionForm = { type: 'permission', reason: '', document: null }; }} 
+                class="btn flex-1 bg-slate-100 text-slate-700 hover:bg-slate-200">
+          Batal
+        </button>
+        <button onclick={handlePermissionSubmit} class="btn flex-1 bg-indigo-600 text-white hover:bg-indigo-700">
+          Kirim
+        </button>
       </div>
     </div>
   </div>
 {/if}
-
-<style>
-  .slide-up {
-    animation: slideUp 0.4s ease-out;
-  }
-
-  @keyframes slideUp {
-    from {
-      opacity: 0;
-      transform: translateY(20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .line-clamp-2 {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-</style>

@@ -1,77 +1,67 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { api } from '../lib/api.js';
   import { auth } from '../lib/auth.svelte.js';
   import Chart from 'chart.js/auto';
 
-  // State
+  // ==================== STATE ====================
   let loading = $state(true);
-  let dashboardData = $state({
-    totalInterns: 0,
-    completedOnTime: 0,
-    completedLate: 0,
-    presentToday: 0,
-    pendingRegistrations: 0,
-    pendingTasks: 0,
-    taskBreakdown: { completed_on_time: 0, completed_late: 0, pending: 0 },
-    attendanceToday: { present: 0, late: 0, permission: 0, sick: 0, absent: 0 },
-    attendanceTrend: [],
-    submittedTasks: [],
-    recentActivities: []
+  let stats = $state({
+    total_interns: 0,
+    total_tasks: 0,
+    completed_on_time: 0,
+    completed_late: 0,
+    pending_tasks: 0,
+    present_today: 0,
+    total_today: 0
   });
 
-  // Chart instances
-  let taskPieChart = null;
-  let attendanceTodayChart = null;
-  let attendanceTrendChart = null;
+  let recentTasks = $state([]);
+  let todayAttendance = $state([]);
+  let weeklyTrend = $state([]);
+  let pendingRegistrations = $state(0);
 
-  // Fetch dashboard data
+  // Charts
+  let taskCompletionChart = null;
+  let weeklyAttendanceChart = null;
+
+  // ==================== DERIVED STATE ====================
+  const attendanceRate = $derived(
+    stats.total_today > 0 
+      ? Math.round((stats.present_today / stats.total_today) * 100) 
+      : 0
+  );
+
+  const taskCompletionRate = $derived(
+    (stats.completed_on_time + stats.completed_late) > 0
+      ? Math.round((stats.completed_on_time / (stats.completed_on_time + stats.completed_late)) * 100)
+      : 0
+  );
+
+  // ==================== DATA FETCHING ====================
+  
   async function fetchDashboardData() {
     loading = true;
     try {
-      const [
-        dashboardRes,
-        pendingInternsRes,
-        submittedTasksRes
-      ] = await Promise.all([
-        api.getAdminDashboard(),
-        api.getInterns({ status: 'pending', limit: 1 }),
-        api.getTasks({ status: 'submitted', limit: 5 })
-      ]);
+      // Fetch admin dashboard data
+      const res = await api.request('/analytics/dashboard/admin');
+      const data = res.data;
 
-      const data = dashboardRes.data;
-      const todayAtt = data.today_attendance || [];
-      
-      dashboardData = {
-        totalInterns: data.stats.total_interns,
-        completedOnTime: data.stats.completed_on_time,
-        completedLate: data.stats.completed_late,
-        presentToday: data.stats.present_today,
-        pendingRegistrations: pendingInternsRes.meta?.total || 0,
-        pendingTasks: data.stats.pending_tasks,
-        taskBreakdown: {
-          completed_on_time: data.stats.completed_on_time,
-          completed_late: data.stats.completed_late,
-          pending: data.stats.pending_tasks
-        },
-        attendanceToday: {
-          present: todayAtt.filter(a => a.status === 'present').length,
-          late: todayAtt.filter(a => a.status === 'late').length,
-          permission: todayAtt.filter(a => a.status === 'permission').length,
-          sick: todayAtt.filter(a => a.status === 'sick').length,
-          absent: data.stats.total_interns - todayAtt.length
-        },
-        attendanceTrend: data.weekly_trend,
-        submittedTasks: submittedTasksRes.data || [],
-        recentActivities: []
-      };
+      stats = data.stats || stats;
+      recentTasks = data.recent_tasks || [];
+      todayAttendance = data.today_attendance || [];
+      weeklyTrend = data.weekly_trend || [];
 
-      // Initialize charts after data is loaded
-      $effect(() => {
-        if (!loading) {
-          setTimeout(initCharts, 100);
-        }
-      });
+      // Fetch pending registrations count (interns with pending status)
+      try {
+        const internsRes = await api.getInterns({ status: 'pending' });
+        pendingRegistrations = internsRes.data?.pagination?.total || 0;
+      } catch (err) {
+        console.error('Failed to fetch pending registrations:', err);
+      }
+
+      // Initialize charts
+      setTimeout(initCharts, 100);
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
     } finally {
@@ -79,24 +69,34 @@
     }
   }
 
+  // ==================== CHART INITIALIZATION ====================
+  
   function initCharts() {
-    // Task Pie Chart
-    const taskPieCtx = document.getElementById('taskPieChart');
-    if (taskPieCtx && taskPieCtx instanceof HTMLCanvasElement) {
-      if (taskPieChart) taskPieChart.destroy();
-      taskPieChart = new Chart(taskPieCtx.getContext('2d'), {
-        type: 'pie',
+    // Destroy existing charts
+    if (taskCompletionChart) taskCompletionChart.destroy();
+    if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
+
+    // Task Completion Doughnut Chart
+    const taskCanvas = document.getElementById('taskCompletionChart');
+    if (taskCanvas instanceof HTMLCanvasElement && (stats.completed_on_time > 0 || stats.completed_late > 0 || stats.pending_tasks > 0)) {
+      const ctx = taskCanvas.getContext('2d');
+      
+      taskCompletionChart = new Chart(ctx, {
+        type: 'doughnut',
         data: {
-          labels: ['Tepat Waktu', 'Terlambat', 'Dalam Proses'],
+          labels: ['Tepat Waktu', 'Terlambat', 'Pending'],
           datasets: [{
             data: [
-              dashboardData.taskBreakdown.completed_on_time,
-              dashboardData.taskBreakdown.completed_late,
-              dashboardData.taskBreakdown.pending
+              stats.completed_on_time,
+              stats.completed_late,
+              stats.pending_tasks
             ],
-            backgroundColor: ['#10b981', '#f59e0b', '#8b5cf6'],
-            borderWidth: 0,
-            hoverOffset: 8
+            backgroundColor: [
+              '#10b981', // emerald - on time
+              '#f59e0b', // amber - late
+              '#6366f1'  // indigo - pending
+            ],
+            borderWidth: 0
           }]
         },
         options: {
@@ -104,93 +104,46 @@
           maintainAspectRatio: false,
           plugins: {
             legend: {
-              position: 'right',
-              align: 'end',
+              position: 'bottom',
               labels: {
-                color: '#64748b',
+                padding: 12,
+                font: { size: 11, weight: 600 },
                 usePointStyle: true,
-                pointStyle: 'circle',
-                padding: 20,
-                font: { family: 'Inter', size: 13, weight: 500 }
+                pointStyle: 'circle'
               }
-            },
-            tooltip: {
-              backgroundColor: 'rgba(30, 41, 59, 0.95)',
-              titleColor: '#fff',
-              bodyColor: '#e2e8f0',
-              borderColor: 'rgba(255, 255, 255, 0.1)',
-              borderWidth: 1,
-              cornerRadius: 12,
-              padding: 14
             }
           }
         }
       });
     }
 
-    // Attendance Today Donut Chart
-    const attendanceTodayCtx = document.getElementById('attendanceTodayChart');
-    if (attendanceTodayCtx && attendanceTodayCtx instanceof HTMLCanvasElement) {
-      if (attendanceTodayChart) attendanceTodayChart.destroy();
-      attendanceTodayChart = new Chart(attendanceTodayCtx.getContext('2d'), {
-        type: 'doughnut',
+    // Weekly Attendance Trend Line Chart
+    const weeklyCanvas = document.getElementById('weeklyAttendanceChart');
+    if (weeklyCanvas instanceof HTMLCanvasElement && weeklyTrend?.length > 0) {
+      const ctx = weeklyCanvas.getContext('2d');
+      
+      weeklyAttendanceChart = new Chart(ctx, {
+        type: 'line',
         data: {
-          labels: ['Hadir', 'Terlambat', 'Izin', 'Sakit', 'Belum Absen'],
-          datasets: [{
-            data: [
-              dashboardData.attendanceToday.present,
-              dashboardData.attendanceToday.late,
-              dashboardData.attendanceToday.permission,
-              dashboardData.attendanceToday.sick,
-              dashboardData.attendanceToday.absent
-            ],
-            backgroundColor: ['#10b981', '#f59e0b', '#3b82f6', '#a855f7', '#ef4444'],
-            borderWidth: 0,
-            hoverOffset: 4
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'right',
-              labels: {
-                color: '#64748b',
-                font: { family: 'Inter', size: 11 },
-                padding: 12,
-                usePointStyle: true,
-                pointStyle: 'circle'
-              }
-            }
-          },
-          cutout: '65%'
-        }
-      });
-    }
-
-    // Attendance Trend Bar Chart
-    const attendanceTrendCtx = document.getElementById('attendanceTrendChart');
-    if (attendanceTrendCtx && attendanceTrendCtx instanceof HTMLCanvasElement) {
-      if (attendanceTrendChart) attendanceTrendChart.destroy();
-      attendanceTrendChart = new Chart(attendanceTrendCtx.getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels: dashboardData.attendanceTrend.map(d => d.day),
+          labels: weeklyTrend.map(d => d.day),
           datasets: [
             {
               label: 'Hadir',
-              data: dashboardData.attendanceTrend.map(d => d.present),
-              backgroundColor: '#10b981',
-              borderRadius: 6,
-              barThickness: 20
+              data: weeklyTrend.map(d => d.present),
+              borderColor: '#10b981',
+              backgroundColor: 'rgba(16, 185, 129, 0.1)',
+              borderWidth: 2,
+              fill: true,
+              tension: 0.4
             },
             {
               label: 'Tidak Hadir',
-              data: dashboardData.attendanceTrend.map(d => d.absent),
-              backgroundColor: '#ef4444',
-              borderRadius: 6,
-              barThickness: 20
+              data: weeklyTrend.map(d => d.absent),
+              borderColor: '#ef4444',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              borderWidth: 2,
+              fill: true,
+              tension: 0.4
             }
           ]
         },
@@ -198,27 +151,27 @@
           responsive: true,
           maintainAspectRatio: false,
           scales: {
-            x: {
-              stacked: true,
-              grid: { display: false },
-              ticks: { color: '#64748b', font: { size: 11 } }
-            },
             y: {
-              stacked: true,
               beginAtZero: true,
-              grid: { color: 'rgba(226, 232, 240, 0.6)' },
-              ticks: { color: '#64748b', stepSize: 1, font: { size: 11 } }
+              ticks: { 
+                stepSize: 1,
+                font: { size: 10 }
+              },
+              grid: { color: 'rgba(0, 0, 0, 0.05)' }
+            },
+            x: {
+              grid: { display: false },
+              ticks: { font: { size: 11, weight: 600 } }
             }
           },
           plugins: {
             legend: {
               position: 'top',
-              align: 'end',
               labels: {
-                color: '#64748b',
+                padding: 12,
+                font: { size: 11, weight: 600 },
                 usePointStyle: true,
-                padding: 16,
-                font: { size: 12 }
+                pointStyle: 'circle'
               }
             }
           }
@@ -227,50 +180,99 @@
     }
   }
 
-  onMount(() => {
-    fetchDashboardData();
+  // ==================== LIFECYCLE ====================
+  
+  onMount(async () => {
+    await fetchDashboardData();
   });
+
+  onDestroy(() => {
+    if (taskCompletionChart) taskCompletionChart.destroy();
+    if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
+  });
+
+  // ==================== UTILITIES ====================
+  
+  function getStatusBadgeClass(status) {
+    const classes = {
+      pending: 'bg-amber-50 text-amber-700 border-amber-200',
+      in_progress: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      submitted: 'bg-violet-50 text-violet-700 border-violet-200',
+      completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      revision: 'bg-red-50 text-red-700 border-red-200'
+    };
+    return classes[status] || 'bg-slate-50 text-slate-700 border-slate-200';
+  }
+
+  function getStatusLabel(status) {
+    const labels = {
+      pending: 'Pending',
+      in_progress: 'In Progress',
+      submitted: 'Submitted',
+      completed: 'Completed',
+      revision: 'Revision',
+      present: 'Hadir',
+      late: 'Terlambat',
+      absent: 'Tidak Hadir',
+      sick: 'Sakit',
+      permission: 'Izin'
+    };
+    return labels[status] || status;
+  }
+
+  function getAttendanceStatusBadgeClass(status) {
+    const classes = {
+      present: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      late: 'bg-amber-50 text-amber-700 border-amber-200',
+      absent: 'bg-red-50 text-red-700 border-red-200',
+      sick: 'bg-blue-50 text-blue-700 border-blue-200',
+      permission: 'bg-indigo-50 text-indigo-700 border-indigo-200'
+    };
+    return classes[status] || 'bg-slate-50 text-slate-700 border-slate-200';
+  }
 </script>
+
+<style>
+  .stat-card, .card {
+    background: rgba(255, 255, 255, 0.85) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+</style>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
   <!-- Header -->
   <div class="mb-6 md:mb-8">
     <h2 class="text-2xl sm:text-3xl font-bold text-slate-800 mb-2">
-      Selamat Datang, {auth.user?.name}! 👋
+      Selamat Datang, {auth.user?.name || 'Admin'}! 👋
     </h2>
     <p class="text-slate-600 text-sm sm:text-base">
-      Dashboard ringkas dan bersih untuk memantau aktivitas magang.
+      Pantau aktivitas magang Interns dalam sekilas.
     </p>
   </div>
 
   {#if loading}
-    <div class="text-center py-20">
-      <div class="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-      <p class="text-slate-500 mt-4">Memuat dashboard...</p>
+    <div class="text-center py-12">
+      <div class="inline-block w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+      <p class="mt-4 text-slate-600">Loading dashboard...</p>
     </div>
   {:else}
     <!-- Pending Registration Alert -->
-    {#if dashboardData.pendingRegistrations > 0}
-      <div class="card p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 bg-gradient-to-br from-amber-50 to-amber-100/30 border-2 border-amber-200">
+    {#if pendingRegistrations > 0}
+      <div class="card p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6"
+           style="background: linear-gradient(135deg, rgba(251,191,36,0.15) 0%, rgba(245,158,11,0.15) 100%); border: 2px solid rgba(251,191,36,0.4);">
         <div class="flex items-center gap-4">
           <div class="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center shadow-lg shadow-amber-500/30">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-              <circle cx="8.5" cy="7" r="4"/>
-              <polyline points="17 11 19 13 23 9"/>
-            </svg>
+            <i class="fas fa-user-clock text-xl"></i>
           </div>
           <div>
-            <p class="font-bold text-amber-800 text-base">{dashboardData.pendingRegistrations} Pendaftaran Menunggu Approval</p>
+            <p class="font-bold text-amber-800 text-base">{pendingRegistrations} Pendaftaran Menunggu Approval</p>
             <p class="text-sm text-amber-600">Ada calon magang yang mendaftar dan membutuhkan persetujuan Anda.</p>
           </div>
         </div>
-        <a href="/interns?status=pending" class="btn bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/30 whitespace-nowrap px-5 py-2.5">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-2">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-            <circle cx="12" cy="12" r="3"/>
-          </svg>
-          Lihat & Approve
+        <a href="/interns?status=pending" 
+           class="btn bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/30 whitespace-nowrap">
+          <i class="fas fa-eye"></i> Lihat & Approve
         </a>
       </div>
     {/if}
@@ -280,15 +282,10 @@
       <!-- Total Siswa -->
       <div class="stat-card bg-white/85 backdrop-blur-xl rounded-2xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-200">
         <div class="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-violet-100 text-violet-700 mb-4">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
+          <i class="fas fa-users text-2xl"></i>
         </div>
         <div class="text-3xl sm:text-4xl font-extrabold text-slate-800 mb-1">
-          {dashboardData.totalInterns}
+          {stats.total_interns}
         </div>
         <div class="text-sm font-medium text-slate-500 uppercase tracking-wide">
           Total Siswa
@@ -298,13 +295,10 @@
       <!-- Tepat Waktu -->
       <div class="stat-card bg-white/85 backdrop-blur-xl rounded-2xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-200">
         <div class="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-green-100 text-green-700 mb-4">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-            <polyline points="22 4 12 14.01 9 11.01"/>
-          </svg>
+          <i class="fas fa-check-circle text-2xl"></i>
         </div>
         <div class="text-3xl sm:text-4xl font-extrabold text-slate-800 mb-1">
-          {dashboardData.completedOnTime}
+          {stats.completed_on_time}
         </div>
         <div class="text-sm font-medium text-slate-500 uppercase tracking-wide">
           Tepat Waktu
@@ -314,204 +308,191 @@
       <!-- Terlambat -->
       <div class="stat-card bg-white/85 backdrop-blur-xl rounded-2xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-200">
         <div class="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-orange-100 text-orange-700 mb-4">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 12 16 14"/>
-          </svg>
+          <i class="fas fa-clock text-2xl"></i>
         </div>
         <div class="text-3xl sm:text-4xl font-extrabold text-slate-800 mb-1">
-          {dashboardData.completedLate}
+          {stats.completed_late}
         </div>
         <div class="text-sm font-medium text-slate-500 uppercase tracking-wide">
           Terlambat
         </div>
       </div>
 
-      <!-- Kehadiran -->
+      <!-- Presensi Hari Ini -->
       <div class="stat-card bg-white/85 backdrop-blur-xl rounded-2xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-200">
-        <div class="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-sky-100 text-sky-700 mb-4">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-            <path d="M9 16l2 2 4-4"/>
-          </svg>
+        <div class="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-blue-100 text-blue-700 mb-4">
+          <i class="fas fa-calendar-check text-2xl"></i>
         </div>
-        <div class="text-2xl sm:text-3xl font-extrabold text-slate-800 mb-1">
-          {dashboardData.presentToday} / {dashboardData.totalInterns}
+        <div class="text-3xl sm:text-4xl font-extrabold text-slate-800 mb-1">
+          {stats.present_today}/{stats.total_today}
         </div>
         <div class="text-sm font-medium text-slate-500 uppercase tracking-wide">
-          Kehadiran
+          Hadir Hari Ini
+        </div>
+        <div class="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div class="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-500"
+               style="width: {attendanceRate}%"></div>
         </div>
       </div>
     </div>
 
-    <!-- Task Overview Card -->
-    <div class="card bg-white/85 backdrop-blur-xl rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 border-b border-slate-100">
-        <h3 class="text-lg font-semibold text-slate-700 flex items-center gap-2">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-white-500">
-            <path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>
-            <path d="M22 12A10 10 0 0 0 12 2v10z"/>
-          </svg>
-          Statistik Tugas
-        </h3>
-        <a href="/tasks/create" class="inline-flex items-center justify-center px-4 py-2 bg-black hover:bg-gray-800 text-white text-sm font-semibold rounded-xl transition-colors duration-200">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-2">
-            <line x1="12" y1="5" x2="12" y2="19"/>
-            <line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          Buat Tugas
-        </a>
-      </div>
-      <div class="p-6">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-          <div class="chart-container h-64 sm:h-72">
-            <canvas id="taskPieChart"></canvas>
-          </div>
-          <div class="space-y-3">
-            <div class="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-              <div class="w-3 h-3 rounded-full bg-green-400 flex-shrink-0"></div>
-              <div class="flex-1 text-sm font-medium text-slate-600">Tepat Waktu</div>
-              <strong class="text-lg font-bold text-slate-800">{dashboardData.completedOnTime}</strong>
-            </div>
-            <div class="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-              <div class="w-3 h-3 rounded-full bg-yellow-400 flex-shrink-0"></div>
-              <div class="flex-1 text-sm font-medium text-slate-600">Terlambat</div>
-              <strong class="text-lg font-bold text-slate-800">{dashboardData.completedLate}</strong>
-            </div>
-            <div class="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-              <div class="w-3 h-3 rounded-full bg-violet-400 flex-shrink-0"></div>
-              <div class="flex-1 text-sm font-medium text-slate-600">Dalam Proses</div>
-              <strong class="text-lg font-bold text-slate-800">{dashboardData.pendingTasks}</strong>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Submitted Tasks (Pending Review) -->
-    {#if dashboardData.submittedTasks.length > 0}
-      <div class="card bg-gradient-to-br from-sky-50 to-blue-50 backdrop-blur-xl rounded-2xl border-2 border-sky-200 shadow-sm overflow-hidden">
-        <div class="p-6 border-b border-sky-100">
-          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h3 class="text-lg font-bold text-sky-700 flex items-center gap-2 mb-1">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M9 11l3 3L22 4"/>
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-                </svg>
-                Tugas Menunggu Review
-                <span class="inline-flex items-center justify-center w-7 h-7 bg-sky-600 text-white text-xs font-bold rounded-full">
-                  {dashboardData.submittedTasks.length}
-                </span>
-              </h3>
-              <p class="text-sm text-sky-600">Siswa telah mengumpulkan tugas berikut dan menunggu review Anda.</p>
-            </div>
-            <a href="/tasks?status=submitted" class="btn bg-sky-600 hover:bg-sky-700 text-white shadow-lg shadow-sky-600/30 text-sm px-4 py-2">
+    <!-- Main Content Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- Left Column (2/3) -->
+      <div class="lg:col-span-2 space-y-6">
+        
+        <!-- Recent Tasks -->
+        <div class="card p-0 overflow-hidden">
+          <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+              <i class="fas fa-tasks text-teal-500"></i> Tugas Terbaru
+            </h3>
+            <a href="/tasks" class="text-xs font-bold text-teal-600 hover:text-teal-700 uppercase tracking-wider hover:underline">
               Lihat Semua
             </a>
           </div>
+
+          <div class="p-4 sm:p-6">
+            {#if recentTasks?.length > 0}
+              <div class="space-y-3">
+                {#each recentTasks as task}
+                  <div class="p-4 bg-slate-50 rounded-lg border border-slate-100 hover:shadow-sm transition-all">
+                    <div class="flex justify-between items-start mb-2">
+                      <div class="flex-1">
+                        <h4 class="font-semibold text-slate-800 mb-1">{task.title}</h4>
+                        <p class="text-xs text-slate-500">
+                          <i class="fas fa-user mr-1"></i>{task.intern_name}
+                        </p>
+                      </div>
+                      <div class="flex flex-col items-end gap-2">
+                        <span class="px-2.5 py-1 rounded text-[10px] font-bold border {getStatusBadgeClass(task.status)}">
+                          {getStatusLabel(task.status)}
+                        </span>
+                        {#if task.is_late}
+                          <span class="px-2 py-0.5 rounded text-[9px] font-bold bg-red-50 text-red-600 border border-red-200">
+                            <i class="fas fa-exclamation-circle mr-1"></i>LATE
+                          </span>
+                        {/if}
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="text-center py-8 text-slate-400">
+                <i class="fas fa-inbox text-3xl mb-2"></i>
+                <p class="text-sm">Tidak ada tugas terbaru</p>
+              </div>
+            {/if}
+          </div>
         </div>
-        <div class="p-6">
+
+        <!-- Today's Attendance -->
+        <div class="card p-0 overflow-hidden">
+          <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+              <i class="fas fa-clipboard-check text-indigo-500"></i> Presensi Hari Ini
+            </h3>
+            <a href="/attendance" class="text-xs font-bold text-indigo-600 hover:text-indigo-700 uppercase tracking-wider hover:underline">
+              Lihat Semua
+            </a>
+          </div>
+
+          <div class="p-4 sm:p-6">
+            {#if todayAttendance?.length > 0}
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead>
+                    <tr class="border-b border-slate-200">
+                      <th class="text-left py-3 px-2 text-xs font-bold text-slate-600 uppercase tracking-wider">Nama</th>
+                      <th class="text-left py-3 px-2 text-xs font-bold text-slate-600 uppercase tracking-wider">Status</th>
+                      <th class="text-left py-3 px-2 text-xs font-bold text-slate-600 uppercase tracking-wider">Jam Masuk</th>
+                      <th class="text-right py-3 px-2 text-xs font-bold text-slate-600 uppercase tracking-wider">Jarak</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each todayAttendance as attendance}
+                      <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                        <td class="py-3 px-2 text-sm font-medium text-slate-800">{attendance.intern_name}</td>
+                        <td class="py-3 px-2">
+                          <span class="px-2 py-0.5 rounded text-[10px] font-bold border {getAttendanceStatusBadgeClass(attendance.status)}">
+                            {getStatusLabel(attendance.status)}
+                          </span>
+                        </td>
+                        <td class="py-3 px-2 text-sm text-slate-600 font-mono">
+                          {attendance.check_in_time || '-'}
+                        </td>
+                        <td class="py-3 px-2 text-right text-sm text-slate-600 font-mono">
+                          {#if attendance.distance !== null && attendance.distance !== undefined}
+                            {attendance.distance}m
+                          {:else}
+                            -
+                          {/if}
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {:else}
+              <div class="text-center py-8 text-slate-400">
+                <i class="fas fa-calendar-times text-3xl mb-2"></i>
+                <p class="text-sm">Belum ada presensi hari ini</p>
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column (1/3) -->
+      <div class="space-y-6">
+        
+        <!-- Task Completion Chart -->
+        <div class="card p-4 sm:p-6">
+          <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
+            <i class="fas fa-chart-pie text-emerald-500"></i> Penyelesaian Tugas
+          </h3>
+          <div class="h-[240px] mb-4">
+            <canvas id="taskCompletionChart"></canvas>
+          </div>
+          <div class="text-center">
+            <div class="text-sm text-slate-600 mb-1">Tingkat Ketepatan Waktu</div>
+            <div class="text-3xl font-black text-slate-800">{taskCompletionRate}%</div>
+          </div>
+        </div>
+
+        <!-- Weekly Attendance Trend -->
+        <div class="card p-4 sm:p-6">
+          <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
+            <i class="fas fa-chart-line text-blue-500"></i> Tren Mingguan
+          </h3>
+          <div class="h-[240px]">
+            <canvas id="weeklyAttendanceChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="card p-4 sm:p-6">
+          <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
+            <i class="fas fa-info-circle text-violet-500"></i> Info Cepat
+          </h3>
           <div class="space-y-3">
-            {#each dashboardData.submittedTasks as task}
-  <div class="bg-white p-4 rounded-xl border border-sky-100 hover:border-sky-300 hover:shadow-md transition-all cursor-pointer flex items-center justify-between gap-4">
-
-    <div class="flex-1">
-      <h4 class="font-bold text-slate-800 mb-1">{task.title}</h4>
-
-      <p class="text-sm text-slate-500 mb-2">
-        {task.description?.substring(0, 100) || 'Tidak ada deskripsi'}
-      </p>
-
-      <div class="flex items-center gap-4 text-xs text-slate-500">
-        <span class="flex items-center gap-1">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-          {task.intern_name || 'Unknown'}
-        </span>
-
-        <span class="flex items-center gap-1">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-          </svg>
-          {task.deadline || 'Tidak ada deadline'}
-        </span>
-      </div>
-    </div>
-
-    <a 
-      href="/task-assignments/{task.id}" 
-      class="btn btn-sm bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded transition-colors duration-200 whitespace-nowrap"
-      aria-label="Review task assignment"
-    >
-      Review
-    </a>
-
-  </div>
-{/each}
-
-          </div>
-        </div>
-      </div>
-    {/if}
-
-    <!-- Charts Row -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- Attendance Today -->
-      <div class="card bg-white/85 backdrop-blur-xl rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div class="p-6 border-b border-slate-100">
-          <h3 class="text-lg font-semibold text-slate-700 flex items-center gap-2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            Kehadiran Hari Ini
-          </h3>
-        </div>
-        <div class="p-6">
-          <div class="chart-container h-64">
-            <canvas id="attendanceTodayChart"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Attendance Trend -->
-      <div class="card bg-white/85 backdrop-blur-xl rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div class="p-6 border-b border-slate-100">
-          <h3 class="text-lg font-semibold text-slate-700 flex items-center gap-2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-500">
-              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-              <polyline points="17 6 23 6 23 12"/>
-            </svg>
-            Tren Kehadiran Mingguan
-          </h3>
-        </div>
-        <div class="p-6">
-          <div class="chart-container h-64">
-            <canvas id="attendanceTrendChart"></canvas>
+            <div class="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
+              <span class="text-sm font-medium text-slate-600">Total Tugas</span>
+              <span class="text-lg font-black text-slate-800">{stats.total_tasks}</span>
+            </div>
+            <div class="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
+              <span class="text-sm font-medium text-slate-600">Tugas Pending</span>
+              <span class="text-lg font-black text-amber-600">{stats.pending_tasks}</span>
+            </div>
+            <div class="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
+              <span class="text-sm font-medium text-slate-600">Tingkat Kehadiran</span>
+              <span class="text-lg font-black text-emerald-600">{attendanceRate}%</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
   {/if}
 </div>
-
-<style>
-  .stat-card {
-    background: rgba(255, 255, 255, 0.85) !important;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-  }
-
-  .chart-container {
-    position: relative;
-  }
-</style>
