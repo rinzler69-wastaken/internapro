@@ -21,6 +21,8 @@
   {:else}
     <IncompleteProfile /> -->
   <!-- {/if} -->
+{:else if userRole === 'supervisor'}
+  <AdminDashboard />
 {:else}
   <div class="p-8 text-center">
     <p class="text-slate-500">Loading dashboard...</p>
