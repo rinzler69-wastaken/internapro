@@ -418,6 +418,36 @@ func (h *SupervisorHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	utils.RespondSuccess(w, "Supervisor rejected", nil)
 }
 
+func (h *SupervisorHandler) GetAllPublic(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.db.Query(`
+		SELECT s.user_id, u.name
+		FROM supervisors s
+		JOIN users u ON s.user_id = u.id
+		WHERE s.status = 'active'
+		ORDER BY u.name ASC
+	`)
+	if err != nil {
+		utils.RespondInternalError(w, "Failed to fetch supervisors")
+		return
+	}
+	defer rows.Close()
+
+	supervisors := []map[string]interface{}{}
+	for rows.Next() {
+		var userID int64
+		var name string
+		if err := rows.Scan(&userID, &name); err != nil {
+			continue
+		}
+		supervisors = append(supervisors, map[string]interface{}{
+			"user_id": userID,
+			"name":    name,
+		})
+	}
+
+	utils.RespondSuccess(w, "Supervisors retrieved", supervisors)
+}
+
 func (h *SupervisorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, _ := strconv.ParseInt(vars["id"], 10, 64)

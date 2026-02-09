@@ -56,20 +56,20 @@ type LoginRequest struct {
 
 // LoginResponse represents login response
 type LoginResponse struct {
-	Token         string      `json:"token"`
+	Token         string       `json:"token"`
 	User          UserResponse `json:"user"`
-	Require2FA    bool        `json:"require_2fa"`
-	SetupRequired bool        `json:"setup_required"` // <--- ADD THIS
+	Require2FA    bool         `json:"require_2fa"`
+	SetupRequired bool         `json:"setup_required"` // <--- ADD THIS
 }
 
 // UserResponse is a safe JSON shape for frontend consumption
 type UserResponse struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Email        string `json:"email"`
-	Role         string `json:"role"`
-	Avatar       string `json:"avatar,omitempty"`
-	Is2FAEnabled bool   `json:"is_2fa_enabled"`
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	Email        string    `json:"email"`
+	Role         string    `json:"role"`
+	Avatar       string    `json:"avatar,omitempty"`
+	Is2FAEnabled bool      `json:"is_2fa_enabled"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -201,9 +201,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Find user
 	var user models.User
 	err := h.db.QueryRow(
-		"SELECT id, name, email, password_hash, role, totp_secret, is_2fa_enabled FROM users WHERE email = ?",
+		"SELECT id, name, email, password_hash, role, totp_secret, is_2fa_enabled, provider FROM users WHERE email = ?",
 		req.Email,
-	).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash, &user.Role, &user.TOTPSecret, &user.Is2FAEnabled)
+	).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash, &user.Role, &user.TOTPSecret, &user.Is2FAEnabled, &user.Provider)
 
 	if err != nil {
 		utils.RespondUnauthorized(w, "Invalid email or password")
@@ -212,8 +212,21 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Verify password
 	if !user.PasswordHash.Valid {
-		utils.RespondUnauthorized(w, "Password login not available for this account")
-		return
+		// Allow first-time password setup for accounts without a password (e.g., created via OAuth)
+		if req.Password == "" {
+			utils.RespondUnauthorized(w, "Password login not available for this account")
+			return
+		}
+		hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			utils.RespondInternalError(w, "Failed to process password")
+			return
+		}
+		if _, err := h.db.Exec("UPDATE users SET password_hash = ?, provider = COALESCE(provider, 'local') WHERE id = ?", string(hashed), user.ID); err != nil {
+			utils.RespondInternalError(w, "Failed to save password")
+			return
+		}
+		user.PasswordHash = sql.NullString{String: string(hashed), Valid: true}
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash.String), []byte(req.Password)); err != nil {
 		utils.RespondUnauthorized(w, "Invalid email or password")
@@ -236,6 +249,47 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		valid := totp.Validate(req.TOTPCode, user.TOTPSecret.String)
 		if !valid {
 			utils.RespondUnauthorized(w, "Invalid 2FA code")
+			return
+		}
+	}
+
+	// 2. Block accounts that are not approved/active (intern & pembimbing/supervisor)
+	role := strings.ToLower(strings.TrimSpace(user.Role))
+	if role == "intern" {
+		var status string
+		err := h.db.QueryRow("SELECT status FROM interns WHERE user_id = ? LIMIT 1", user.ID).Scan(&status)
+		if err == sql.ErrNoRows {
+			utils.RespondForbidden(w, "Profil magang belum lengkap. Hubungi admin untuk melengkapi data.")
+			return
+		}
+		if err != nil {
+			utils.RespondInternalError(w, "Gagal memeriksa status magang")
+			return
+		}
+
+		if status != "active" {
+			if status == "pending" {
+				utils.RespondForbidden(w, "Akun Anda belum disetujui admin. Silakan tunggu persetujuan sebelum login.")
+				return
+			}
+			utils.RespondForbidden(w, "Akun magang tidak aktif. Hubungi admin.")
+			return
+		}
+	}
+
+	if role == "pembimbing" || role == "supervisor" {
+		var status string
+		err := h.db.QueryRow("SELECT status FROM supervisors WHERE user_id = ? LIMIT 1", user.ID).Scan(&status)
+		if err == sql.ErrNoRows {
+			utils.RespondForbidden(w, "Profil pembimbing belum lengkap. Hubungi admin.")
+			return
+		}
+		if err != nil {
+			utils.RespondInternalError(w, "Gagal memeriksa status pembimbing")
+			return
+		}
+		if status == "pending" {
+			utils.RespondForbidden(w, "Akun pembimbing belum disetujui admin. Silakan tunggu persetujuan.")
 			return
 		}
 	}
@@ -460,7 +514,21 @@ func toUserResponse(user models.User) UserResponse {
 		resp.Name = user.Name.String
 	}
 	if user.Avatar.Valid {
-		resp.Avatar = user.Avatar.String
+		resp.Avatar = prependUploadPath(user.Avatar.String)
 	}
 	return resp
+}
+
+func prependUploadPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "http") || strings.HasPrefix(path, "/uploads/") {
+		return path
+	}
+	clean := strings.TrimLeft(path, "/")
+	if strings.HasPrefix(clean, "uploads/") {
+		return "/" + clean
+	}
+	return "/uploads/" + clean
 }

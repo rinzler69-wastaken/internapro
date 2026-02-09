@@ -1,41 +1,50 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { api } from '../lib/api.js';
   import { auth } from '../lib/auth.svelte.js';
   import Chart from 'chart.js/auto';
   import L from 'leaflet';
-
-
-
   
-  
-  // Office Configuration
-  const OFFICE = {
+  // Office Configuration - This should match backend config
+  const OFFICE = $state({
     lat: -7.0355,
     lng: 110.4746,
     name: 'PT. DUTA SOLUSI INFORMATIKA',
     maxDistance: 1000 // meters
-  };
+  });
 
-  // State
+  // ==================== STATE ====================
   let loading = $state(true);
+  let dashboardLoading = $state(false);
+  let viewMode = $state('presensi'); // 'presensi' | 'tugas'
+  
+  // Attendance State
   let todayAttendance = $state(null);
-  let gpsStatus = $state('loading');
+  let gpsStatus = $state('loading'); // loading, ready, error, denied
   let gps = $state({ lat: null, lng: null, error: null });
+  let checkingIn = $state(false);
+  let checkingOut = $state(false);
+  
+  // Map State
   let map = $state(null);
   let userMarker = $state(null);
   let officeMarker = $state(null);
+  let radiusCircle = $state(null);
   
   // Dashboard Data
   let dashboardData = $state({
     totalTasks: 0,
     pendingTasks: 0,
     completedTasks: 0,
+    inProgressTasks: 0,
     taskStats: { pending: 0, in_progress: 0, submitted: 0, completed: 0, revision: 0 },
     taskBreakdown: { pending: 0, in_progress: 0, submitted: 0, completed: 0, revision: 0 },
     recentTasks: [],
     weeklyAttendance: { days: [], counts: [], colors: [] },
-    attendancePercentage: 0
+    attendancePercentage: 0,
+    attendanceHistory: [], // weekly list
+    attendanceLast30: [],  // last 30 days raw
+    office: null
   });
 
   // Modals
@@ -48,36 +57,69 @@
     document: null
   });
 
-  // Check-in state
-  let checkingIn = $state(false);
-
   // Charts
+  /** @type {import('chart.js/auto').Chart | null} */
   let taskProgressChart = null;
+  /** @type {import('chart.js/auto').Chart | null} */
   let weeklyAttendanceChart = null;
+  let watchId = null;
 
-  // Calculated distance
+    // Permission Form State
+  let permissionStatus = $state('sick');
+  let permissionNotes = $state('');
+  let permissionFile = $state(null);
+  let fileInput; 
+
+    let isSubmittingPermission = $state(false); // Khusus Kirim Izin
+
+  
+
+
+  // ==================== DERIVED STATE ====================
+  
+  // Calculate distance from office
   const distance = $derived(
     gps.lat && gps.lng 
       ? Math.round(getDistance(gps.lat, gps.lng, OFFICE.lat, OFFICE.lng))
       : null
   );
 
-// 2. Update canCheckIn to be strictly dependent on data existence
+  // Check if user can check in
 const canCheckIn = $derived(
   !loading &&
+  !checkingIn &&
   gpsStatus === 'ready' &&
   distance !== null &&
   distance <= OFFICE.maxDistance &&
-  todayAttendance === null // Strictly null
+  todayAttendance === null
 );
 
+  
+  // Check if user can check out
+  const canCheckOut = $derived(
+    !loading &&
+    !checkingOut &&
+    todayAttendance !== null &&
+    (todayAttendance.checked_in === true || !!todayAttendance.check_in_time) &&
+    (todayAttendance.checked_out === false || !todayAttendance.check_out_time) &&
+    !['permission', 'sick'].includes(todayAttendance.status)
+  );
+
+  // Check if user is late
   const isLate = $derived(() => {
     const now = new Date();
     const hour = now.getHours();
     const minute = now.getMinutes();
-    return (hour > 8) || (hour === 8 && minute > 0); // Late after 08:00
+    return (hour > 8) || (hour === 8 && minute > 0);
   });
 
+  // Attendance completion status
+  const attendanceComplete = $derived(
+    todayAttendance !== null && 
+    ((todayAttendance.checked_out === true || !!todayAttendance.check_out_time) || ['permission', 'sick', 'absent', 'off'].includes(todayAttendance.status))
+  );
+
+  // ==================== GEOLOCATION ====================
   
   // Haversine formula for distance calculation
   function getDistance(lat1, lon1, lat2, lon2) {
@@ -93,195 +135,453 @@ const canCheckIn = $derived(
     return R * c;
   }
 
-  // Fetch dashboard data
-  async function fetchDashboardData() {
-    loading = true;
-    try {
-      const res = await api.getInternDashboard();
-      const data = res.data;
-      
-      todayAttendance = data.today_attendance || null;
+  // Initialize geolocation tracking
+  function initGeolocation() {
+    if (!navigator.geolocation) {
+      gpsStatus = 'error';
+      gps.error = 'Geolocation not supported';
+      return;
+    }
 
-      dashboardData = {
-        totalTasks: data.task_stats.total,
-        pendingTasks: data.task_stats.pending,
-        completedTasks: data.task_stats.completed,
-        taskStats: data.task_breakdown,
-        taskBreakdown: data.task_breakdown,
-        recentTasks: data.recent_tasks || [],
-        weeklyAttendance: {
-          days: data.weekly_attendance_counts.labels,
-          counts: data.weekly_attendance_counts.data,
-          colors: data.weekly_attendance_counts.colors
-        },
-        attendancePercentage: data.attendance_percentage
-      };
+    // Get initial position
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        gps = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          error: null
+        };
+        gpsStatus = 'ready';
+        updateMapPosition();
+      },
+      (error) => {
+        console.error('Geolocation error:', error);
+        gpsStatus = error.code === 1 ? 'denied' : 'error';
+        gps.error = error.message;
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
 
-      // Initialize charts
-      setTimeout(initCharts, 100);
-    } catch (err) {
-      console.error('Failed to fetch dashboard data:', err);
-    } finally {
-      loading = false;
+    // Watch position for continuous updates
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        gps = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          error: null
+        };
+        if (gpsStatus !== 'ready') gpsStatus = 'ready';
+        updateMapPosition();
+      },
+      (error) => {
+        console.error('Watch position error:', error);
+      },
+      { enableHighAccuracy: true, maximumAge: 30000 }
+    );
+  }
+
+  // Update user marker position on map
+  function updateMapPosition() {
+    if (!map || !gps.lat || !gps.lng) return;
+
+    /** @type {[number, number]} */
+    const userPos = [gps.lat, gps.lng];
+
+    if (userMarker) {
+      userMarker.setLatLng(userPos);
+    } else {
+      userMarker = L.marker(userPos, {
+        icon: L.divIcon({
+          className: 'user-marker',
+          html: '<div style="background:#10b981; width:24px; height:24px; border-radius:50%; border:3px solid white; box-shadow:0 2px 8px rgba(0,0,0,0.3); animation: pulse 2s infinite;"></div>',
+          iconSize: [24, 24]
+        })
+      }).addTo(map);
     }
   }
 
-  // Initialize Leaflet map
+  // ==================== MAP INITIALIZATION ====================
+  
   function initMap() {
-    if (typeof window === 'undefined' || !window.L) return;
-    
-    if (map) {
-      map.remove();
-    }
+    if (typeof window === 'undefined') return;
 
     const mapElement = document.getElementById('map');
     if (!mapElement) return;
 
-    map = window.L.map('map').setView([OFFICE.lat, OFFICE.lng], 15);
+    // If map exists but DOM was destroyed (view switched), recreate
+    if (map && map._container !== mapElement) {
+      map.remove();
+      map = null;
+    }
 
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
+    if (!map) {
+      map = L.map('map').setView([OFFICE.lat, OFFICE.lng], 15);
 
-    // Office marker
-    officeMarker = window.L.marker([OFFICE.lat, OFFICE.lng], {
-      icon: window.L.divIcon({
-        className: 'office-marker',
-        html: '<div style="background:#6366f1; width:32px; height:32px; border-radius:50%; border:4px solid white; box-shadow:0 2px 8px rgba(0,0,0,0.3);"></div>',
-        iconSize: [32, 32]
-      })
-    }).addTo(map).bindPopup(OFFICE.name);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
 
-    // Circle showing check-in range
-    window.L.circle([OFFICE.lat, OFFICE.lng], {
-      color: '#6366f1',
-      fillColor: '#6366f1',
-      fillOpacity: 0.1,
-      radius: OFFICE.maxDistance
-    }).addTo(map);
-  }
-
-  // Update user location on map
-  function updateUserLocation() {
-    if (!map || !gps.lat || !gps.lng) return;
-
-    if (userMarker) {
-      userMarker.setLatLng([gps.lat, gps.lng]);
-    } else {
-      userMarker = window.L.marker([gps.lat, gps.lng], {
-        icon: window.L.divIcon({
-          className: 'user-marker',
-          html: '<div style="background:#10b981; width:20px; height:20px; border-radius:50%; border:3px solid white; box-shadow:0 2px 8px rgba(0,0,0,0.3);"></div>',
-          iconSize: [20, 20]
+      officeMarker = L.marker([OFFICE.lat, OFFICE.lng], {
+        icon: L.divIcon({
+          className: 'office-marker',
+          html: '<div style="background:#10b981; width:32px; height:32px; border-radius:50%; border:4px solid white; box-shadow:0 2px 8px rgba(0,0,0,0.3);"></div>',
+          iconSize: [32, 32]
         })
-      }).addTo(map).bindPopup('Lokasi Anda');
+      }).addTo(map).bindPopup(OFFICE.name);
+
+      radiusCircle = L.circle([OFFICE.lat, OFFICE.lng], {
+        color: '#6366f1',
+        fillColor: '#6366f1',
+        fillOpacity: 0.1,
+        radius: OFFICE.maxDistance
+      }).addTo(map);
     }
 
-    map.setView([gps.lat, gps.lng], 16);
+    setTimeout(() => map.invalidateSize(), 100);
   }
 
-  // Initialize GPS tracking
-  function initGPS() {
-    if (!navigator.geolocation) {
-      gpsStatus = 'error';
-      gps.error = 'GPS tidak didukung di browser ini';
-      return;
-    }
+  // ==================== DATA FETCHING ====================
+  
+  function formatLocalDateKey(d) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 
-    gpsStatus = 'loading';
-    
-    navigator.geolocation.watchPosition(
-      (position) => {
-        gps.lat = position.coords.latitude;
-        gps.lng = position.coords.longitude;
-        gps.error = null;
-        gpsStatus = 'ready';
-        updateUserLocation();
-      },
-      (error) => {
-        gps.error = error.message;
-        gpsStatus = 'error';
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 10000
+  function getCurrentWeekRange() {
+    const today = new Date();
+    // Make Monday = 0, Sunday = 6
+    const dayIndex = (today.getDay() + 6) % 7;
+    const start = new Date(today);
+    start.setDate(today.getDate() - dayIndex);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+
+    return { start, end, startStr: formatLocalDateKey(start), endStr: formatLocalDateKey(end) };
+  }
+
+  function getLast30Range() {
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(today.getDate() - 29);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+    return { startStr: formatLocalDateKey(start), endStr: formatLocalDateKey(end) };
+  }
+
+  function isInCurrentWeek(record) {
+    if (!record) return false;
+    const { startStr, endStr } = getCurrentWeekRange();
+    const key = formatLocalDateKey(new Date(record.date || record.check_in_time || record.created_at || Date.now()));
+    return key >= startStr && key <= endStr;
+  }
+
+  const weeklyAttendanceList = $derived(
+    (dashboardData.attendanceLast30?.length ? dashboardData.attendanceLast30 : dashboardData.attendanceHistory || [])
+      .filter(isInCurrentWeek)
+  );
+
+  async function fetchDashboardData() {
+    dashboardLoading = true;
+    try {
+      const { startStr, endStr } = getCurrentWeekRange();
+      const { startStr: start30, endStr: end30 } = getLast30Range();
+
+      const [tasksRes, todayRes, weeklyRes, last30Res] = await Promise.all([
+        api.getTasks({ limit: 100 }),
+        api.getTodayAttendance(),
+        api.getAttendance({ start: startStr, end: endStr, limit: 200 }),
+        api.getAttendance({ start: start30, end: end30, limit: 400 })
+      ]);
+      
+      const tasks = tasksRes.data || [];
+      const weeklyHistory = weeklyRes.data || [];
+      const history30 = last30Res.data || [];
+
+      // Parse today's attendance (align with Attendance.svelte structure)
+      const todayData = todayRes.data?.attendance || todayRes.data || null;
+      if (todayRes.data?.off_day) {
+        todayAttendance = {
+          status: todayRes.data?.status || 'off',
+          off_day: true,
+          date: todayRes.data?.date,
+          message: todayRes.data?.message || 'Tidak ada jadwal kantor!',
+          note: todayRes.data?.note || 'Selamat beristirahat!',
+        };
+      } else if (!todayRes.data?.checked_in && todayRes.data?.closed_today) {
+        todayAttendance = {
+          status: 'absent',
+          date: todayRes.data?.date,
+          check_in_time: null,
+          check_out_time: null,
+          closed_today: true,
+        };
+      } else {
+        todayAttendance = todayData;
       }
-    );
+
+      // Calculate task stats
+      const taskStats = { pending: 0, in_progress: 0, submitted: 0, completed: 0, revision: 0 };
+      tasks.forEach(t => {
+        if (taskStats[t.status] !== undefined) taskStats[t.status]++;
+      });
+
+      // Weekly stats for current week
+      const weeklyStats = processWeeklyAttendance(weeklyHistory);
+
+      // Attendance percentage from last 30 days
+      const presentCount = history30.filter(h => ['present', 'late'].includes(h.status)).length;
+      const totalDays = history30.length || 1;
+      const attendancePercentage = Math.round((presentCount / totalDays) * 100);
+
+      dashboardData = {
+        totalTasks: tasks.length,
+        pendingTasks: taskStats.pending,
+        completedTasks: taskStats.completed,
+        inProgressTasks: taskStats.in_progress,
+        taskStats: taskStats,
+        taskBreakdown: taskStats,
+        recentTasks: tasks.slice(0, 5),
+        weeklyAttendance: weeklyStats,
+        attendancePercentage: attendancePercentage,
+        attendanceHistory: weeklyHistory,
+        attendanceLast30: history30,
+        office: null
+      };
+
+      // Initialize charts after data is loaded
+      setTimeout(initCharts, 100);
+    } catch (err) {
+      console.error('Failed to fetch dashboard data:', err);
+    } finally {
+      dashboardLoading = false;
+    }
   }
 
-  // Handle check-in
+  function processWeeklyAttendance(history) {
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(today.getDate() - today.getDay() + 1); // Monday
+    start.setHours(0, 0, 0, 0);
+    
+    const days = [];
+    const counts = [];
+    const colors = [];
+
+    console.log('Processing weekly attendance, total records:', history.length);
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayName = d.toLocaleDateString('id-ID', { weekday: 'short' });
+      days.push(dayName);
+
+      // Find matching record - check multiple possible date fields
+      const record = history.find(h => {
+        // Try different date field formats
+        let hDate = '';
+        
+        if (h.date) {
+          hDate = h.date.split('T')[0];
+        } else if (h.check_in_time) {
+          hDate = h.check_in_time.split('T')[0];
+        }
+        
+        return hDate === dateStr;
+      });
+
+      console.log(`Day ${dayName} (${dateStr}):`, record ? `Found - ${record.status}` : 'No record');
+
+      if (record && record.status) {
+        counts.push(1);
+        // Color based on status
+        switch (record.status) {
+          case 'present':
+            colors.push('#10b981'); // green
+            break;
+          case 'late':
+            colors.push('#f59e0b'); // amber
+            break;
+          case 'sick':
+            colors.push('#6366f1'); // indigo
+            break;
+          case 'permission':
+            colors.push('#8b5cf6'); // violet
+            break;
+          case 'absent':
+            colors.push('#ef4444'); // red
+            break;
+          default:
+            colors.push('#ef4444'); // red
+        }
+      } else {
+        counts.push(0);
+        colors.push('#e2e8f0'); // gray for no attendance
+      }
+    }
+    
+    console.log('Weekly data processed:', { days, counts, colors });
+    return { days, counts, colors };
+  }
+
+  // ==================== CHART INITIALIZATION ====================
+  
+  function initCharts() {
+    // Destroy existing charts
+    if (taskProgressChart) taskProgressChart.destroy();
+    if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
+
+    // Task Progress Pie Chart
+    const taskCanvas = document.getElementById('taskProgressChart');
+    if (taskCanvas instanceof HTMLCanvasElement && dashboardData.taskBreakdown) {
+      const ctx = taskCanvas.getContext('2d');
+      const breakdown = dashboardData.taskBreakdown;
+      
+      taskProgressChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Pending', 'In Progress', 'Submitted', 'Completed', 'Revision'],
+          datasets: [{
+            data: [
+              breakdown.pending || 0,
+              breakdown.in_progress || 0,
+              breakdown.submitted || 0,
+              breakdown.completed || 0,
+              breakdown.revision || 0
+            ],
+            backgroundColor: [
+              '#f59e0b', // amber
+              '#6366f1', // indigo
+              '#8b5cf6', // violet
+              '#10b981', // emerald
+              '#ef4444'  // red
+            ],
+            borderWidth: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: {
+            padding: 50
+          },
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                padding: 12,
+                font: { size: 14, weight: 600 },
+                usePointStyle: true,
+                pointStyle: 'circle'
+              }
+            }
+          }
+        }
+      });
+    }
+
+  }
+
+  // Re-init charts or map when the visible mode changes
+  $effect(() => {
+    viewMode;
+    if (!dashboardLoading && !loading) {
+      if (viewMode === 'tugas') {
+        setTimeout(initCharts, 50);
+      } else if (viewMode === 'presensi') {
+        setTimeout(() => {
+          initMap();
+          updateMapPosition();
+        }, 50);
+      }
+    }
+  });
+
+  // ==================== ATTENDANCE ACTIONS ====================
+  
   async function handleCheckIn() {
     if (!canCheckIn) return;
-    
-    // Check if late
-    if (isLate()) {
+
+    // Check if late and show modal
+    if (isLate() && !showLateModal) {
       showLateModal = true;
       return;
     }
 
-    await performCheckIn();
-  }
-
-  async function performCheckIn(reason = null) {
     checkingIn = true;
     try {
-      const result = await api.checkIn(gps.lat, gps.lng, reason);
-      todayAttendance = result.data;
-      showLateModal = false;
-      lateReason = '';
+      const payload = {
+        latitude: gps.lat,
+        longitude: gps.lng
+      };
+      
+      if (lateReason && lateReason.trim()) {
+        payload.reason = lateReason.trim();
+      }
+
+      const res = await api.checkIn(gps.lat, gps.lng, lateReason || null);
+      
+      if (res.success !== false) {
+        // Refresh dashboard data to get updated attendance
+        await fetchDashboardData();
+        showLateModal = false;
+        lateReason = '';
+      }
     } catch (err) {
       console.error('Check-in failed:', err);
-      alert('Gagal check-in: ' + (err.message || 'Unknown error'));
+      alert(err.message || 'Check-in failed');
     } finally {
       checkingIn = false;
     }
   }
 
   async function handleCheckOut() {
-    if (!todayAttendance || todayAttendance.check_out_time) return;
+    if (!canCheckOut) return;
+    
+    if (!confirm('Konfirmasi check-out?')) return;
 
-    if (!gps.lat || !gps.lng) {
-      alert('Lokasi GPS belum siap');
-      return;
-    }
-
-    checkingIn = true;
+    checkingOut = true;
     try {
-      const result = await api.checkOut(gps.lat, gps.lng);
-      todayAttendance = result.data;
-    } catch (err) {
-      console.error('Check-out failed:', err);
-      alert('Gagal check-out: ' + (err.message || 'Unknown error'));
-    } finally {
-      checkingIn = false;
-    }
-  }
-
-  function submitLateReason() {
-    if (!lateReason.trim()) {
-      alert('Mohon isi alasan keterlambatan!');
-      return;
-    }
-    performCheckIn(lateReason);
-  }
-
-  async function submitPermission() {
-    try {
-      const payload = {
-        type: permissionForm.type,
-        reason: permissionForm.reason,
-        document: permissionForm.document,
-        latitude: gps.lat,
-        longitude: gps.lng
-      };
-      
-      await api.submitPermission(payload);
-      showPermissionModal = false;
-      permissionForm = { type: 'permission', reason: '', document: null };
+      await api.checkOut(gps.lat || 0, gps.lng || 0);
       await fetchDashboardData();
     } catch (err) {
+      console.error('Check-out failed:', err);
+      alert(err.message || 'Check-out failed');
+    } finally {
+      checkingOut = false;
+    }
+  }
+
+  async function handlePermissionSubmit() {
+    if (!permissionNotes?.trim()) {
+      alert('Mohon isi keterangan.');
+      return;
+    }
+
+    isSubmittingPermission = true;
+    try {
+      await api.submitPermission({
+        status: permissionStatus,
+        notes: permissionNotes,
+        proof_file: permissionFile
+      });
+      
+      showPermissionModal = false;
+      permissionNotes = '';
+      permissionFile = null;
+      await fetchDashboardData();
+      alert('Pengajuan izin berhasil dikirim.');
+    } catch (err) {
       console.error('Permission submission failed:', err);
-      alert('Gagal mengajukan izin: ' + (err.message || 'Unknown error'));
+      alert(err.message || 'Gagal mengirim pengajuan');
+    } finally {
+      isSubmittingPermission = false;
     }
   }
 
@@ -292,435 +592,645 @@ const canCheckIn = $derived(
     }
   }
 
-  // Initialize charts
-  function initCharts() {
-    // Task Progress Donut Chart
-    const taskProgressCtx = document.getElementById('taskProgressChart');
-    if (taskProgressCtx && taskProgressCtx instanceof HTMLCanvasElement) {
-      if (taskProgressChart) taskProgressChart.destroy();
-      
-      taskProgressChart = new Chart(taskProgressCtx.getContext('2d'), {
-        type: 'doughnut',
-        data: {
-          labels: ['Pending', 'Proses', 'Submitted', 'Completed', 'Revisi'],
-          datasets: [{
-            data: [
-              dashboardData.taskBreakdown.pending,
-              dashboardData.taskBreakdown.in_progress,
-              dashboardData.taskBreakdown.submitted,
-              dashboardData.taskBreakdown.completed,
-              dashboardData.taskBreakdown.revision
-            ],
-            backgroundColor: ['#fbbf24', '#6366f1', '#a855f7', '#10b981', '#f43f5e'],
-            borderWidth: 0,
-            hoverOffset: 4
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'right',
-              labels: {
-                usePointStyle: true,
-                pointStyle: 'circle',
-                boxWidth: 6,
-                font: { size: 10, family: 'Inter' }
-              }
-            }
-          },
-          cutout: '70%'
-        }
-      });
-    }
+  // ==================== LIFECYCLE ====================
+  
+  onMount(async () => {
+    loading = true;
+    
+    // Start geolocation
+    initGeolocation();
+    
+    // Fetch dashboard data
+    await fetchDashboardData();
+    
+    loading = false;
+    
+    // Initialize map after DOM is ready
+    setTimeout(() => {
+      initMap();
+      updateMapPosition();
+    }, 100);
+  });
 
-    // Weekly Attendance Bar Chart
-    const weeklyAttendanceCtx = document.getElementById('weeklyAttendanceChart');
-    if (weeklyAttendanceCtx && weeklyAttendanceCtx instanceof HTMLCanvasElement) {
-      if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
-      
-      weeklyAttendanceChart = new Chart(weeklyAttendanceCtx.getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels: dashboardData.weeklyAttendance.days,
-          datasets: [{
-            label: 'Status',
-            data: dashboardData.weeklyAttendance.counts,
-            backgroundColor: dashboardData.weeklyAttendance.colors,
-            borderRadius: 4,
-            barThickness: 16
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: { beginAtZero: true, display: false },
-            x: {
-              grid: { display: false },
-              ticks: { font: { size: 10 } }
-            }
-          },
-          plugins: {
-            legend: { display: false }
-          }
-        }
-      });
+  onDestroy(() => {
+    // Cleanup
+    if (watchId) {
+      navigator.geolocation.clearWatch(watchId);
     }
-  }
+    if (map) {
+      map.remove();
+    }
+    if (taskProgressChart) taskProgressChart.destroy();
+    if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
+  });
 
-  function formatTime(timeStr) {
-    if (!timeStr) return '-';
-    if (timeStr.includes('T')) {
-      return new Date(timeStr).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    }
-    return timeStr;
-  }
-
-  function getChartColor(status) {
-    switch (status) {
-      case 'present': return '#10b981';
-      case 'late': return '#f59e0b';
-      case 'permission': return '#3b82f6';
-      case 'sick': return '#a855f7';
-      case 'absent': return '#ef4444';
-      default: return '#cbd5e1';
-    }
-  }
-
-  function getPriorityColor(priority) {
-    switch (priority) {
-      case 'high': return 'bg-rose-100 text-rose-800 border-rose-200';
-      case 'medium': return 'bg-amber-100 text-amber-800 border-amber-200';
-      default: return 'bg-emerald-100 text-emerald-800 border-emerald-200';
-    }
+  // ==================== UTILITIES ====================
+  
+  function getStatusBadgeClass(status) {
+    const classes = {
+      pending: 'bg-amber-50 text-amber-700 border-amber-200',
+      in_progress: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      submitted: 'bg-violet-50 text-violet-700 border-violet-200',
+      completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      revision: 'bg-red-50 text-red-700 border-red-200'
+    };
+    return classes[status] || 'bg-slate-50 text-slate-700 border-slate-200';
   }
 
   function getStatusColor(status) {
     switch (status) {
-      case 'completed': return 'bg-emerald-100 text-emerald-700';
-      case 'in_progress': return 'bg-indigo-100 text-indigo-700';
-      case 'submitted': return 'bg-purple-100 text-purple-700';
-      case 'revision': return 'bg-rose-100 text-rose-700';
-      default: return 'bg-amber-100 text-amber-700';
+      case 'present': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+      case 'late': return 'bg-amber-100 text-amber-700 border-amber-200';
+      case 'sick': return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'permission': return 'bg-purple-100 text-purple-700 border-purple-200';
+      case 'absent': return 'bg-red-100 text-red-700 border-red-200';
+      default: return 'bg-slate-100 text-slate-600 border-slate-200';
     }
   }
 
   function getStatusLabel(status) {
-    switch (status) {
-      case 'pending': return 'Pending';
-      case 'in_progress': return 'Dalam Proses';
-      case 'submitted': return 'Submitted';
-      case 'completed': return 'Selesai';
-      case 'revision': return 'Revisi';
-      default: return status;
-    }
+    const labels = {
+      pending: 'Pending',
+      in_progress: 'In Progress',
+      submitted: 'Submitted',
+      completed: 'Completed',
+      revision: 'Revision',
+      present: 'Hadir',
+      late: 'Terlambat',
+      sick: 'Sakit',
+      permission: 'Izin',
+      absent: 'Tidak Hadir'
+      
+    };
+    return labels[status] || status;
   }
 
-  onMount(() => {
-    // Load Leaflet CSS and JS
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
-    link.crossOrigin = '';
-    document.head.appendChild(link);
+  function formatDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
 
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
-    script.crossOrigin = '';
-    script.onload = () => {
-      initMap();
-      initGPS();
-    };
-    document.head.appendChild(script);
+  function formatTime(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  }
 
-    fetchDashboardData();
+    let showModal = $state(false);
+    let modalData = $state(null);
+  
 
-    return () => {
-      if (map) map.remove();
-      if (taskProgressChart) taskProgressChart.destroy();
-      if (weeklyAttendanceChart) weeklyAttendanceChart.destroy();
-    };
-  });
+    function closeModal() {
+    showModal = false;
+    modalData = null;
+  }
+
+
+    function handleKeydown(e) {
+    if (e.key === 'Escape') {
+      if (showPermissionModal) showPermissionModal = false;
+      if (showLateModal) showLateModal = false;
+      if (showModal) closeModal();
+    }
+  }
 </script>
 
-<div class="slide-up max-w-[1600px] mx-auto space-y-6">
+<svelte:head>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" />
+</svelte:head>
+
+<style>
+
+:root {
+  --bg: #f9fafb;
+  --card: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --ring: #d1d5db;
+}
+
+  .material-symbols-outlined {
+    font-variation-settings:
+      'FILL' 0,
+      'wght' 200,
+      'GRAD' 0,
+      'opsz' 20;
+  }
+
+  :global(.user-marker), :global(.office-marker) {
+    z-index: 1000 !important;
+  }
+  
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.8; }
+  }
+  
+  .stat-card, .card {
+    background: rgba(255, 255, 255, 0.85) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .date-pill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px;
+    background: #ffffff; border: 1px solid #e2e8f0; border-radius: 9999px;
+    color: #64748b; font-size: 14px; font-weight: 500;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+  }
+
+
+.action-pill {
+  padding: 0.5rem 0.9rem;   /* slimmer */
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  min-height: 2.5rem;       /* reduced thickness */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+/* Primary action (check-in/out) */
+.pill-primary {
+  background: #111;
+  color: white;
+  border-color: #111;
+}
+
+.pill-primary:hover:not(:disabled) {
+  background: #000;
+}
+
+/* Secondary action (izin/sakit) */
+.pill-secondary {
+  background: #f3f4f6;
+  color: #111;
+  border-color: var(--border);
+  border: 1px solid;
+}
+
+.pill-secondary:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+/* Success pill (clock-in info) */
+.pill-success {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+    cursor: not-allowed;
+
+}
+
+.action-pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+  .map-reset {
+    position: absolute;
+    bottom: 1rem;
+    right: 1rem;
+    z-index: 400;
+    background: white;
+    width: 7.5rem;
+    height: 2.5rem;
+    border-radius: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .map-reset:hover {
+    background: #f3f4f6;
+    transform: scale(1.05);
+  }
+
+  .highlight { color: #10b981; }
+
+    .info-bar {
+    display: flex; justify-content: space-around; background: #f8fafc; padding: 12px; border-radius: 12px; border: 1px solid #f1f5f9;
+  }
+
+  .info-item { display: flex; flex-direction: column; align-items: center; }
+  .info-item .label { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; }
+  .info-item .value { font-size: 15px; font-weight: 600; font-family: monospace; }
+
+
+</style>
+
+<svelte:window onkeydown={handleKeydown} />
+
+
+<div class="slide-up max-w-[1400px] mx-auto space-y-6">
   <!-- Header -->
-  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-    <div>
-      <h2 class="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight mb-1">
-        Selamat datang kembali! {auth.user?.name}
+  <div class="flex flex-col gap-4">
+    <!-- Desktop Header -->
+    <div class="hidden md:flex justify-between items-center">
+      <div>
+        <h2 class="text-xl font-semibold text-slate-800 tracking-tight">
+          Selamat Datang, <span class="highlight">{auth.user?.name || 'Intern'}</span>
+        </h2>
+      </div>
+      <div class="flex items-center gap-3">
+        <button onclick={() => viewMode = 'presensi'} class="px-5 py-2 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2 {viewMode === 'presensi' ? 'bg-slate-900 text-white border border-transparent' : 'bg-white text-slate-900 border border-slate-200 hover:border-slate-300'}">
+          <span class="material-symbols-outlined text-[18px]">map</span>
+          Presensi
+        </button>
+        <button onclick={() => viewMode = 'tugas'} class="px-5 py-2 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2 {viewMode === 'tugas' ? 'bg-slate-900 text-white border border-transparent' : 'bg-white text-slate-900 border border-slate-200 hover:border-slate-300'}">
+          <span class="material-symbols-outlined text-[18px]">assignment</span>
+          Tugas
+        </button>
+        <div class="date-pill h-[38px]">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+        </div>
+      </div>
+    </div>
+    
+    <!-- Mobile Header -->
+    <div class="md:hidden flex flex-col gap-4">
+      <h2 class="text-xl font-semibold text-slate-800 tracking-tight">
+        Selamat Datang, <span class="highlight">{auth.user?.name || 'Intern'}</span>
       </h2>
-      <p class="text-slate-500 font-medium text-sm sm:text-base">
-        Berikut ringkasan aktivitas magang Anda.
-      </p>
-    </div>
-    <div class="text-right hidden sm:block">
-      <div class="text-sm font-semibold text-slate-600">
-        {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+      <div class="flex justify-center">
+        <div class="date-pill w-full justify-center h-[38px]">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+        </div>
+      </div>
+      <div class="flex gap-2 w-full">
+        <button onclick={() => viewMode = 'presensi'} class="flex-1 px-5 py-2 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2 {viewMode === 'presensi' ? 'bg-slate-900 text-white border border-transparent' : 'bg-white text-slate-900 border border-slate-200 hover:border-slate-300'}">
+          <span class="material-symbols-outlined text-[18px]">map</span>
+          Presensi
+        </button>
+        <button onclick={() => viewMode = 'tugas'} class="flex-1 px-5 py-2 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2 {viewMode === 'tugas' ? 'bg-slate-900 text-white border border-transparent' : 'bg-white text-slate-900 border border-slate-200 hover:border-slate-300'}">
+          <span class="material-symbols-outlined text-[18px]">assignment</span>
+          Tugas
+        </button>
       </div>
     </div>
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- LEFT COLUMN (2/3) -->
-    <div class="lg:col-span-2 space-y-6">
-      <!-- ATTENDANCE CARD -->
-      <div class="card p-0 overflow-hidden">
-        <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-          <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-500">
-              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-              <circle cx="12" cy="10" r="3"/>
-            </svg>
-            Presensi Harian
-          </h3>
-          <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold {gpsStatus === 'ready' ? 'bg-emerald-100 text-emerald-700' : gpsStatus === 'error' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}">
-            <div class="w-1.5 h-1.5 rounded-full {gpsStatus === 'ready' ? 'bg-emerald-500' : gpsStatus === 'error' ? 'bg-rose-500' : 'bg-slate-400'} mr-1.5 {gpsStatus === 'loading' ? 'animate-pulse' : ''}"></div>
-            {gpsStatus === 'ready' ? 'GPS Aktif' : gpsStatus === 'error' ? 'GPS Error' : 'Mencari Lokasi...'}
-          </div>
-        </div>
-
-        <div class="p-4 sm:p-6 space-y-4">
-          <!-- Map -->
-          <div class="relative h-[220px] sm:h-[300px] w-full rounded-xl overflow-hidden border border-slate-200 shadow-inner">
-            <div id="map" class="h-full w-full z-0"></div>
-          </div>
-
-          <!-- Office Info -->
-          <div class="flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
-            <span class="text-sm font-medium text-slate-600 flex items-center gap-2">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-400">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                <polyline points="9 22 9 12 15 12 15 22"/>
-              </svg>
-              Kantor: <span class="font-bold text-slate-800">{OFFICE.name}</span>
-            </span>
-            <span class="text-sm font-medium text-slate-600">
-              Jarak: <span class="font-mono font-bold text-slate-800">{distance !== null ? distance + ' m' : '-- m'}</span>
-            </span>
-          </div>
-
-          <!-- Action Buttons -->
-          <div>
-            {#if loading}
-              <div class="text-center py-4">
-                <div class="inline-block w-6 h-6 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+  {#if loading}
+    <div class="text-center py-12">
+      <div class="inline-block w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+      <p class="mt-4 text-slate-600">Loading dashboard...</p>
+    </div>
+  {:else}
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+      {#if viewMode === 'presensi'}
+        <!-- PRESENSI MODE: Map (Left 2/3) & Attendance Stats (Right 1/3) -->
+        <div class="lg:col-span-2 space-y-6">
+        
+          <!-- ATTENDANCE CARD -->
+          <div class="card p-0 overflow-hidden">
+            <div class="px-3 py-2 sm:px-6 sm:py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+                <span class="material-symbols-outlined text-indigo-500">map</span> Presensi Harian
+              </h3>
+              <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold"
+                  class:bg-emerald-100={gpsStatus === 'ready'}
+                  class:text-emerald-700={gpsStatus === 'ready'}
+                  class:bg-slate-100={gpsStatus === 'loading'}
+                  class:text-slate-500={gpsStatus === 'loading'}
+                  class:bg-red-100={gpsStatus === 'error' || gpsStatus === 'denied'}
+                  class:text-red-700={gpsStatus === 'error' || gpsStatus === 'denied'}>
+                <div class="w-1.5 h-1.5 rounded-full mr-1.5"
+                    class:bg-emerald-500={gpsStatus === 'ready'}
+                    class:bg-slate-400={gpsStatus === 'loading'}
+                    class:bg-red-500={gpsStatus === 'error' || gpsStatus === 'denied'}
+                    class:animate-pulse={gpsStatus === 'loading'}></div>
+                {#if gpsStatus === 'ready'}GPS Ready
+                {:else if gpsStatus === 'loading'}Mencari Lokasi...
+                {:else if gpsStatus === 'denied'}GPS Denied
+                {:else}GPS Error{/if}
               </div>
-            {:else if !todayAttendance}
-              <!-- Check-in Button -->
-              <button
-                onclick={handleCheckIn}
-                disabled={!canCheckIn || checkingIn}
-                class="btn w-full py-3.5 text-base font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 bg-indigo-600 text-white hover:bg-indigo-700 transition-all"
-              >
-                {#if checkingIn}
-                  <div class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                {/if}
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-2">
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                  <circle cx="12" cy="10" r="3"/>
-                </svg>
-                {canCheckIn ? 'PRESENSI MASUK SEKARANG' : (distance !== null ? (distance > OFFICE.maxDistance ? `TERLALU JAUH (${distance}m)` : 'Menunggu GPS...') : 'Menunggu GPS...')}
-              </button>
-            {:else if !todayAttendance.check_out_time && todayAttendance.status !== 'permission' && todayAttendance.status !== 'sick'}
-              <!-- Check-out Button -->
-              <div class="text-center mb-4">
-                <div class="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-50 text-emerald-700 font-medium text-sm border border-emerald-100">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-2">
-                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                    <polyline points="22 4 12 14.01 9 11.01"/>
-                  </svg>
-                  Anda masuk pukul <strong class="ml-1">{formatTime(todayAttendance.check_in_time)}</strong>
+            </div>
+
+            <div class="p-4 sm:p-5 space-y-4">
+              <!-- Map -->
+              <div class="relative h-[250px] sm:h-[300px] w-full rounded-xl overflow-hidden border-slate-200 shadow-inner">
+                <div id="map" class="h-full w-full z-0"></div>
+                <button class="map-reset" style="bottom: 4rem;" onclick={() => { if(gps.lat && gps.lng) map?.setView([gps.lat, gps.lng], 15); }} aria-label="My Location" title="My Location">
+                  <span class="material-symbols-outlined text-slate-600">location_on</span>
+                    <span class="text-slate-600 ml-2 text-sm">My Location</span>
+                </button>
+                <button class="map-reset" onclick={() => map?.setView([OFFICE.lat, OFFICE.lng], 15)} aria-label="Target" title="Target">
+                  <span class="material-symbols-outlined text-slate-600">gps_fixed</span>
+                    <span class="text-slate-600 ml-2 text-sm">Re-center</span>
+
+                </button>
+              </div>
+
+              <!-- Office Info & Distance -->
+              <div class="flex flex-col sm:flex-row justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-100">
+                <span class="text-sm font-medium text-slate-600 flex flex-col sm:flex-row items-center sm:items-center text-center sm:text-left gap-1 sm:gap-2">
+                  <span class="flex items-center gap-2 justify-center whitespace-nowrap">
+                    <i class="material-symbols-outlined text-slate-400">domain</i>
+                    Kantor:
+                  </span>
+                  <span class="font-bold text-slate-800">
+                    {OFFICE.name}
+                  </span>
+                </span>
+              </div>
+
+              <div class="info-bar">
+                <div class="info-item">
+                  <span class="label">Jarak Kantor</span>
+                  <span class="value {distance !== null && distance <= OFFICE.maxDistance ? 'text-emerald-600' : 'text-rose-500'}">
+                    {distance !== null ? distance + ' m' : '--'}
+                  </span>
+                </div>
+                <div class="info-item border-l border-slate-200 pl-6">
+                  <span class="label">Batas Maksimal</span>
+                  <span class="value text-slate-700">{OFFICE.maxDistance} m</span>
                 </div>
               </div>
-              <button
-                onclick={handleCheckOut}
-                disabled={checkingIn}
-                class="btn w-full py-3.5 text-base font-bold bg-amber-500 text-white hover:bg-amber-600 shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50"
-              >
-                {#if checkingIn}
-                  <div class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+
+              <!-- Action Buttons -->
+              <div>
+                {#if todayAttendance?.off_day}
+                  <div class="flex items-center gap-4 p-5 bg-emerald-50/70 border border-emerald-200 rounded-xl justify-center">
+                    <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center shadow-sm shrink-0">
+                      <span class="material-symbols-outlined text-2xl">check_circle</span>
+                    </div>
+                    <div>
+                      <h4 class="font-bold text-emerald-800 text-lg leading-tight">{todayAttendance.message || 'Tidak ada jadwal kantor!'}</h4>
+                      <p class="text-emerald-600 font-medium text-sm mt-0.5">
+                        {todayAttendance.note || 'Selamat beristirahat!'}
+                      </p>
+                    </div>
+                  </div>
+                {:else if attendanceComplete}
+                  {#if todayAttendance?.status === 'absent'}
+                    <div class="flex items-center gap-4 p-5 bg-rose-50/70 border border-rose-200 rounded-xl justify-center">
+                      <div class="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center shadow-sm shrink-0">
+                        <span class="material-symbols-outlined text-2xl">close</span>
+                      </div>
+                      <div>
+                        <h4 class="font-bold text-rose-800 text-lg leading-tight">Presensi Telah Ditutup</h4>
+                        <p class="text-rose-600 font-medium text-sm mt-0.5">
+                          Status: Tidak Hadir (lewat batas waktu)
+                        </p>
+                      </div>
+                    </div>
+                  {:else}
+                    <div class="flex items-center gap-4 p-5 bg-emerald-50/50 border border-emerald-100 rounded-xl justify-center">
+                      <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center shadow-sm shrink-0">
+                        <span class="material-symbols-outlined text-2xl">check</span>
+                      </div>
+                      <div>
+                        <h4 class="font-bold text-emerald-800 text-lg leading-tight">Selesai Hari Ini</h4>
+                        <p class="text-emerald-600 font-medium text-sm mt-0.5">
+                          Status: <span class="capitalize">{todayAttendance?.status || 'Completed'}</span>
+                        </p>
+                      </div>
+                    </div>
+                  {/if}
+                {:else if canCheckOut}
+                  <!-- Show Check-In Time & Check-Out Button -->
+                  <div class="flex flex-col sm:flex-row gap-3">
+
+                    <div class="flex-1 action-pill pill-success text-emerald-700 border-emerald-100 shadow-sm text-sm">
+                      <span class="material-symbols-outlined mr-2">schedule</span> 
+                      <span>Masuk Pada: <strong class="font-mono text-base">{formatTime(todayAttendance?.check_in_time)}</strong></span>
+                    </div>
+                    <button
+                      onclick={handleCheckOut}
+                      disabled={checkingOut}
+                      class="flex-1 action-pill pill-primary text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed shadow-sm">
+                      {#if checkingOut}
+                        <span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                        Processing...
+                      {:else}
+                        <span class="material-symbols-outlined mr-2">logout</span> PRESENSI KELUAR
+                      {/if}
+                    </button>
+                  </div>
+                {:else}
+                  <div class="flex flex-col sm:flex-row gap-3">
+
+                    <!-- Check-In Button -->
+                    <button
+                      onclick={handleCheckIn}
+                      disabled={!canCheckIn || checkingIn}
+                      class="flex-1 action-pill pill-primary text-sm sm:text-base disabled:cursor-not-allowed shadow-sm">
+                      {#if checkingIn}
+                        <span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
+                        Processing...
+                      {:else if gpsStatus === 'loading'}
+                        <span class="material-symbols-outlined animate-spin mr-2">progress_activity</span> Menunggu GPS...
+                      {:else if gpsStatus === 'denied'}
+                        <span class="material-symbols-outlined mr-2">warning</span> GPS Ditolak
+                      {:else if gpsStatus === 'error'}
+                        <span class="material-symbols-outlined mr-2">error</span> GPS Error
+                      {:else if distance === null}
+                        <span class="material-symbols-outlined mr-2">near_me</span> Menunggu Lokasi...
+                      {:else if distance > OFFICE.maxDistance}
+                        <span class="material-symbols-outlined mr-2">location_on</span> Terlalu Jauh ({distance}m)
+                      {:else}
+                        <span class="material-symbols-outlined mr-2">login</span> PRESENSI MASUK
+                      {/if}
+                    </button>
+
+                    <!-- Permission Button -->
+                    <button
+                      onclick={() => showPermissionModal = true}
+                      class="flex-1 action-pill pill-secondary text-sm sm:text-base shadow-sm">
+                      <span class="material-symbols-outlined mr-2">sick</span> Izin / Sakit
+                    </button>
+                  </div>
                 {/if}
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-2">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <polyline points="16 17 21 12 16 7"/>
-                  <line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
-                PRESENSI KELUAR SEKARANG
-              </button>
-            {:else}
-              <!-- Attendance Completed -->
-              <div class="text-center p-6 bg-emerald-50/50 border border-emerald-100 rounded-xl">
-                <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 shadow-sm">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                </div>
-                <h4 class="font-bold text-emerald-800 text-lg">Selesai Hari Ini</h4>
-                <p class="text-emerald-600 font-medium text-sm mt-1">
-                  Status: <span class="capitalize">{todayAttendance.status}</span>
-                </p>
               </div>
-            {/if}
-          </div>
-
-          <!-- Permission Link -->
-          {#if !todayAttendance}
-            <div class="text-center pt-2">
-              <button
-                onclick={() => showPermissionModal = true}
-                class="text-sm text-indigo-600 hover:text-indigo-700 font-semibold hover:underline"
-              >
-                Tidak bisa datang? Ajukan Izin/Sakit
-              </button>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <!-- TASKS CARD -->
-      <div class="card p-0 overflow-hidden">
-        <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-          <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-teal-500">
-              <path d="M9 11l3 3L22 4"/>
-              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-            </svg>
-            Tugas Saya
-          </h3>
-          <a href="/tasks" class="text-xs font-bold text-teal-600 hover:text-teal-700 uppercase tracking-wider hover:underline">
-            Lihat Semua
-          </a>
-        </div>
-
-        <div class="p-4 sm:p-6 space-y-6">
-          <!-- Task Progress Stats -->
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            <div class="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 text-center hover:bg-white hover:shadow-md transition-all">
-              <div class="text-2xl font-black text-slate-700">{dashboardData.totalTasks}</div>
-              <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Total</div>
-            </div>
-            <div class="bg-amber-50 p-3 sm:p-4 rounded-xl border border-amber-100 text-center hover:bg-white hover:shadow-md transition-all">
-              <div class="text-2xl font-black text-amber-600">{dashboardData.pendingTasks}</div>
-              <div class="text-[10px] font-bold text-amber-600/70 uppercase tracking-wider mt-1">Pending</div>
-            </div>
-            <div class="bg-indigo-50 p-3 sm:p-4 rounded-xl border border-indigo-100 text-center hover:bg-white hover:shadow-md transition-all">
-              <div class="text-2xl font-black text-indigo-600">{dashboardData.taskStats.in_progress}</div>
-              <div class="text-[10px] font-bold text-indigo-600/70 uppercase tracking-wider mt-1">Proses</div>
-            </div>
-            <div class="bg-emerald-50 p-3 sm:p-4 rounded-xl border border-emerald-100 text-center hover:bg-white hover:shadow-md transition-all">
-              <div class="text-2xl font-black text-emerald-600">{dashboardData.completedTasks}</div>
-              <div class="text-[10px] font-bold text-emerald-600/70 uppercase tracking-wider mt-1">Selesai</div>
             </div>
           </div>
+        </div>
 
-          <!-- Recent Tasks -->
-          <div class="space-y-3">
-            <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wider">Tugas Terbaru</h4>
-            {#if dashboardData.recentTasks.length > 0}
-              {#each dashboardData.recentTasks as task}
-                <div class="bg-white p-4 rounded-xl border border-slate-100 hover:border-slate-300 hover:shadow-md transition-all">
-                  <div class="flex items-start justify-between gap-3 mb-2">
-                    <h5 class="font-bold text-slate-800 text-sm flex-1">{task.title}</h5>
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold {getPriorityColor(task.priority)}">
-                      {task.priority}
+        <!-- Right Column for Presensi Mode -->
+        <div class="space-y-6">
+          <!-- Weekly Attendance -->
+          <div class="card p-4 sm:p-6 h-[425px] flex flex-col">
+            <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2 shrink-0">
+              <span class="material-symbols-outlined text-indigo-500">date_range</span> Presensi Minggu Ini
+            </h3>
+            <div class="flex-1 overflow-y-auto pr-1 space-y-3">
+              {#if weeklyAttendanceList.length}
+                {#each weeklyAttendanceList as item (item.date || item.id)}
+                  <div class="border border-slate-100 rounded-lg px-3 py-2 flex items-center justify-between">
+                    <div class="flex flex-col">
+                      <span class="text-sm font-semibold text-slate-800">
+                        {formatDate(item.date || item.check_in_time || item.created_at)}
+                      </span>
+                      <span class="text-xs text-slate-500">
+                        Masuk: {formatTime(item.check_in_time)} · Pulang: {formatTime(item.check_out_time)}
+                      </span>
+                    </div>
+                    <span class={`text-xs font-bold px-2 py-1 rounded-full border ${getStatusColor(item.status)}`}>
+                      {getStatusLabel(item.status)}
                     </span>
                   </div>
-                  <p class="text-xs text-slate-500 mb-3 line-clamp-2">{task.description || 'Tidak ada deskripsi'}</p>
-                  <div class="flex items-center justify-between text-xs">
-                    <span class="inline-flex items-center px-2 py-0.5 rounded font-bold {getStatusColor(task.status)}">
-                      {getStatusLabel(task.status)}
-                    </span>
-                    <span class="text-slate-400 flex items-center gap-1">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                        <line x1="16" y1="2" x2="16" y2="6"/>
-                        <line x1="8" y1="2" x2="8" y2="6"/>
-                        <line x1="3" y1="10" x2="21" y2="10"/>
-                      </svg>
-                      {task.deadline || 'No deadline'}
+                {/each}
+              {:else}
+                <p class="text-sm text-slate-500">Belum ada data presensi minggu ini.</p>
+              {/if}
+            </div>
+          </div>
+
+          <!-- Attendance Percentage -->
+          <div class="card p-4 sm:p-6">
+            <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
+              <span class="material-symbols-outlined text-emerald-500">percent</span> Persentase Kehadiran
+            </h3>
+            <div class="text-center">
+              <div class="text-5xl font-black text-slate-800 mb-2">
+                {dashboardData.attendancePercentage}%
+              </div>
+              <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-500"
+                    style="width: {dashboardData.attendancePercentage}%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      {:else}
+        <!-- TUGAS MODE: Tasks Card (Left 2/3) & Task Charts (Right 1/3) -->
+        <div class="lg:col-span-2 space-y-6">
+          <!-- TASKS CARD -->
+          <div class="card p-0 overflow-hidden">
+            <div class="px-5 py-5 sm:px-8 sm:py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+                <span class="material-symbols-outlined text-teal-500">assignment</span> Tugas Aktif
+              </h3>
+              <a href="/tasks" class="text-xs font-bold text-teal-600 hover:text-teal-700 uppercase tracking-wider hover:underline">
+                Lihat Semua
+              </a>
+            </div>
+
+            <div class="p-4 sm:p-6 space-y-6">
+              <!-- Task Stats -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                <div class="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 text-center hover:bg-white hover:shadow-md transition-all">
+                  <div class="text-2xl font-black text-slate-700">{dashboardData.totalTasks}</div>
+                  <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">Total</div>
+                </div>
+                <div class="bg-amber-50 p-3 sm:p-4 rounded-xl border border-amber-100 text-center hover:bg-white hover:shadow-md transition-all">
+                  <div class="text-2xl font-black text-amber-600">{dashboardData.pendingTasks}</div>
+                  <div class="text-[10px] font-bold text-amber-600/70 uppercase tracking-wider mt-1">Pending</div>
+                </div>
+                <div class="bg-indigo-50 p-3 sm:p-4 rounded-xl border border-indigo-100 text-center hover:bg-white hover:shadow-md transition-all">
+                  <div class="text-2xl font-black text-indigo-600">{dashboardData.inProgressTasks}</div>
+                  <div class="text-[10px] font-bold text-indigo-600/70 uppercase tracking-wider mt-1">Proses</div>
+                </div>
+                <div class="bg-emerald-50 p-3 sm:p-4 rounded-xl border border-emerald-100 text-center hover:bg-white hover:shadow-md transition-all">
+                  <div class="text-2xl font-black text-emerald-600">{dashboardData.completedTasks}</div>
+                  <div class="text-[10px] font-bold text-emerald-600/70 uppercase tracking-wider mt-1">Selesai</div>
+                </div>
+              </div>
+
+              <!-- Progress Bar -->
+              {#if dashboardData.totalTasks > 0}
+                <div>
+                  <div class="flex justify-between items-center mb-2">
+                    <span class="text-xs font-bold text-slate-600 uppercase tracking-wider">Progress</span>
+                    <span class="text-sm font-black text-slate-800">
+                      {Math.round((dashboardData.completedTasks / dashboardData.totalTasks) * 100)}%
                     </span>
                   </div>
+                  <div class="h-3 bg-slate-100 rounded-full overflow-hidden">
+                    <div class="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-500"
+                        style="width: {(dashboardData.completedTasks / dashboardData.totalTasks) * 100}%"></div>
+                  </div>
                 </div>
-              {/each}
-            {:else}
-              <div class="text-center py-8 text-slate-400">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 opacity-50">
-                  <path d="M9 11l3 3L22 4"/>
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-                </svg>
-                <p class="text-sm">Belum ada tugas</p>
-              </div>
-            {/if}
+              {/if}
+
+              <!-- Recent Tasks -->
+              {#if dashboardData.recentTasks?.length > 0}
+                <div class="space-y-3">
+                  <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Tugas Terbaru</h4>
+                  {#each dashboardData.recentTasks as task}
+                    <a href="/tasks/{task.id}" class="block p-3 bg-slate-50 rounded-lg border border-slate-200 hover:shadow-sm hover:bg-white transition-all">
+                      <div class="flex justify-between items-start mb-2">
+                        <h5 class="font-semibold text-slate-800 text-sm">{task.title}</h5>
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold border {getStatusBadgeClass(task.status)}">
+                          {getStatusLabel(task.status)}
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-3 text-xs text-slate-500">
+                        {#if task.deadline}
+                          <span class="flex items-center"><span class="material-symbols-outlined text-[16px] mr-1">calendar_today</span>{formatDate(task.deadline)}</span>
+                        {/if}
+                        {#if task.priority}
+                          <span class="capitalize flex items-center">
+                            <span class="material-symbols-outlined text-[16px] mr-1" 
+                              class:text-red-500={task.priority === 'high'}
+                              class:text-amber-500={task.priority === 'medium'}
+                              class:text-slate-400={task.priority === 'low'}>flag</span>
+                            {task.priority}
+                          </span>
+                        {/if}
+                      </div>
+                    </a>
+                  {/each}
+                </div>
+              {:else}
+                <div class="text-center py-8 text-slate-400">
+                  <span class="material-symbols-outlined text-4xl mb-2">inbox</span>
+                  <p class="text-sm">Tidak ada tugas</p>
+                </div>
+              {/if}
+            </div>
           </div>
         </div>
-      </div>
+
+        <!-- Right Column for Tugas Mode -->
+        <div class="space-y-6">
+          <!-- Task Breakdown Chart -->
+          <div class="card p-4 sm:p-6">
+            <h3 class="font-bold text-base text-slate-800 mb-4 flex items-center gap-2">
+              <span class="material-symbols-outlined text-violet-500">pie_chart</span> Status Tugas
+            </h3>
+            <div class="h-[500px]">
+              <canvas id="taskProgressChart"></canvas>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
-
-    <!-- RIGHT COLUMN (1/3) -->
-    <div class="space-y-6">
-      <!-- Task Progress Chart -->
-      <div class="card p-0 overflow-hidden">
-        <div class="p-4 border-b border-slate-100 bg-slate-50/50">
-          <h3 class="font-bold text-base text-slate-800">Progress Tugas</h3>
-        </div>
-        <div class="p-4">
-          <div class="h-48">
-            <canvas id="taskProgressChart"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Weekly Attendance Chart -->
-      <div class="card p-0 overflow-hidden">
-        <div class="p-4 border-b border-slate-100 bg-slate-50/50">
-          <h3 class="font-bold text-base text-slate-800">Kehadiran Mingguan</h3>
-        </div>
-        <div class="p-4">
-          <div class="h-32">
-            <canvas id="weeklyAttendanceChart"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Attendance Percentage -->
-      <div class="card">
-        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Persentase Kehadiran</h4>
-        <div class="text-4xl font-black text-slate-800 mb-2">{dashboardData.attendancePercentage}%</div>
-        <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-          <div class="bg-gradient-to-r from-emerald-500 to-teal-500 h-full rounded-full transition-all" style="width: {dashboardData.attendancePercentage}%"></div>
-        </div>
-      </div>
-    </div>
-  </div>
+  {/if}
 </div>
 
 <!-- Late Reason Modal -->
 {#if showLateModal}
-  <div 
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" 
-    role="button" 
-    tabindex="0" 
-    onclick={(e) => { if (e.target === e.currentTarget) showLateModal = false; }} 
-    onkeydown={(e) => { if (e.key === 'Escape') showLateModal = false; }}
-  >
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" role="document">
-      <h3 class="text-lg font-bold text-slate-800 mb-4">Alasan Terlambat</h3>
-      <p class="text-sm text-slate-600 mb-4">Anda terlambat hari ini. Mohon isi alasan keterlambatan Anda.</p>
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onclick={(e) => e.target === e.currentTarget && (showLateModal = false)}>
+    <div class="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+      <h3 class="text-xl font-bold text-slate-800 mb-4">Alasan Terlambat</h3>
+      <p class="text-sm text-slate-600 mb-4">Anda terlambat. Mohon berikan alasan:</p>
       <textarea
         bind:value={lateReason}
-        class="w-full px-4 py-3 border border-slate-200 rounded-lg resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-        rows="4"
-        placeholder="Contoh: Terlambat karena macet..."
-      ></textarea>
+        placeholder="Tulis alasan..."
+        class="w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+        rows="3"></textarea>
       <div class="flex gap-3 mt-4">
-        <button onclick={() => showLateModal = false} class="btn btn-outline flex-1">Batal</button>
-        <button onclick={submitLateReason} class="btn btn-primary flex-1" disabled={checkingIn}>
-          {checkingIn ? 'Mengirim...' : 'Kirim & Check In'}
+        <button onclick={() => showLateModal = false} class="btn flex-1 bg-slate-100 text-slate-700 hover:bg-slate-200">
+          Batal
+        </button>
+        <button onclick={handleCheckIn} class="btn flex-1 bg-indigo-600 text-white hover:bg-indigo-700">
+          Lanjutkan Check-In
         </button>
       </div>
     </div>
@@ -729,76 +1239,75 @@ const canCheckIn = $derived(
 
 <!-- Permission Modal -->
 {#if showPermissionModal}
-  <div 
-    class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" 
-    role="button" 
-    tabindex="0" 
-    onclick={(e) => { if (e.target === e.currentTarget) showPermissionModal = false; }} 
-    onkeydown={(e) => { if (e.key === 'Escape') showPermissionModal = false; }}
-  >
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" role="document">
-      <h3 class="text-lg font-bold text-slate-800 mb-4">Ajukan Izin/Sakit</h3>
-      
-      <div class="space-y-4">
-        <div>
-          <label for="permission-type" class="block text-sm font-semibold text-slate-700 mb-2">Tipe</label>
-          <select id="permission-type" bind:value={permissionForm.type} class="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-            <option value="permission">Izin</option>
-            <option value="sick">Sakit</option>
-          </select>
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onclick={(e) => e.target === e.currentTarget && (showPermissionModal = false)}>
+    <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity"></div>
+    
+    <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col overflow-hidden">
+        <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <h3 class="font-bold text-lg text-slate-800">Pengajuan Izin / Sakit</h3>
+            <button onclick={() => showPermissionModal = false} class="text-slate-400 hover:text-slate-600">
+                <span class="material-symbols-outlined">close</span>
+            </button>
         </div>
+        
+        <div class="p-6 space-y-4">
+            <!-- Kategori -->
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-2" for="perm-status">Kategori</label>
+                <div class="flex gap-3">
+                    <label class="flex-1 cursor-pointer">
+                        <input type="radio" value="sick" bind:group={permissionStatus} class="peer sr-only">
+                        <div class="text-center p-3 rounded-xl border border-slate-200 text-slate-600 peer-checked:bg-indigo-50 peer-checked:border-indigo-500 peer-checked:text-indigo-700 transition-all">
+                            🤒 Sakit
+                        </div>
+                    </label>
+                    <label class="flex-1 cursor-pointer">
+                        <input type="radio" value="permission" bind:group={permissionStatus} class="peer sr-only">
+                        <div class="text-center p-3 rounded-xl border border-slate-200 text-slate-600 peer-checked:bg-indigo-50 peer-checked:border-indigo-500 peer-checked:text-indigo-700 transition-all">
+                            📝 Izin
+                        </div>
+                    </label>
+                </div>
+            </div>
 
-        <div>
-          <label for="permission-reason" class="block text-sm font-semibold text-slate-700 mb-2">Alasan</label>
-          <textarea
-            id="permission-reason"
-            bind:value={permissionForm.reason}
-            class="w-full px-4 py-3 border border-slate-200 rounded-lg resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            rows="4"
-            placeholder="Jelaskan alasan Anda..."
-          ></textarea>
+            <!-- Keterangan -->
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-2" for="perm-notes">Keterangan</label>
+                <textarea 
+                    bind:value={permissionNotes}
+                    rows="3" 
+                    class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none text-sm"
+                    placeholder="Jelaskan alasan Anda..."></textarea>
+            </div>
+
+            <!-- File Upload -->
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-2" for="file-upload">Bukti Pendukung (Opsional)</label>
+                <label class="block w-full p-4 border-2 border-dashed border-slate-300 rounded-xl text-center cursor-pointer hover:bg-slate-50 hover:border-indigo-400 transition-all">
+                    {#if permissionFile}
+                        <span class="text-indigo-600 font-medium text-sm">{permissionFile.name}</span>
+                    {:else}
+                        <span class="text-slate-500 text-sm">Klik untuk upload surat dokter/dokumen</span>
+                    {/if}
+                    <input 
+                        id="file-upload"
+                        type="file" 
+                        hidden 
+                        bind:this={fileInput}
+                        onchange={(e) => permissionFile = e.currentTarget.files?.[0] || null}
+                    >
+                </label>
+            </div>
+
+            <!-- Submit -->
+            <button 
+                onclick={handlePermissionSubmit} 
+                disabled={isSubmittingPermission}
+                class="w-full py-3 px-4 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+            >
+                {isSubmittingPermission ? 'Mengirim...' : 'Kirim Pengajuan'}
+            </button>
         </div>
-
-        <div>
-          <label for="permission-doc" class="block text-sm font-semibold text-slate-700 mb-2">Dokumen Pendukung (Opsional)</label>
-          <input
-            id="permission-doc"
-            type="file"
-            accept="image/*,.pdf"
-            onchange={handleFileChange}
-            class="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-          />
-        </div>
-      </div>
-
-      <div class="flex gap-3 mt-6">
-        <button onclick={() => showPermissionModal = false} class="btn btn-outline flex-1">Batal</button>
-        <button onclick={submitPermission} class="btn btn-primary flex-1">Kirim</button>
-      </div>
     </div>
   </div>
 {/if}
-
-<style>
-  .slide-up {
-    animation: slideUp 0.4s ease-out;
-  }
-
-  @keyframes slideUp {
-    from {
-      opacity: 0;
-      transform: translateY(20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .line-clamp-2 {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-</style>

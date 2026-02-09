@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"dsi_interna_sys/internal/config"
+	"dsi_interna_sys/internal/holiday"
 	"dsi_interna_sys/internal/middleware"
 	"dsi_interna_sys/internal/models"
 	"dsi_interna_sys/internal/utils"
@@ -20,8 +22,44 @@ type AttendanceHandler struct {
 	db *sql.DB
 }
 
+var holidayCache = struct {
+	mu   sync.RWMutex
+	data map[int]map[string]bool
+}{
+	data: map[int]map[string]bool{},
+}
+
 func NewAttendanceHandler(db *sql.DB) *AttendanceHandler {
 	return &AttendanceHandler{db: db}
+}
+
+func isHolidayDate(t time.Time) bool {
+	year := t.Year()
+
+	holidayCache.mu.RLock()
+	if m, ok := holidayCache.data[year]; ok {
+		defer holidayCache.mu.RUnlock()
+		_, exists := m[t.Format("2006-01-02")]
+		return exists
+	}
+	holidayCache.mu.RUnlock()
+
+	hols, _ := holiday.GetHolidays(year)
+	m := make(map[string]bool, len(hols))
+	for _, h := range hols {
+		m[h.Date] = true
+	}
+	holidayCache.mu.Lock()
+	holidayCache.data[year] = m
+	holidayCache.mu.Unlock()
+	return m[t.Format("2006-01-02")]
+}
+
+func isOffDay(t time.Time) bool {
+	if t.Weekday() == time.Sunday {
+		return true
+	}
+	return isHolidayDate(t)
 }
 
 // Helpers to convert SQL Nulls to JSON Pointers
@@ -52,6 +90,20 @@ func sqlNullIntToPointer(i sql.NullInt64) *int {
 		return &val
 	}
 	return nil
+}
+
+func prependUpload(path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "http") || strings.HasPrefix(path, "/uploads/") {
+		return path
+	}
+	clean := strings.TrimLeft(path, "/")
+	if strings.HasPrefix(clean, "uploads/") {
+		return "/" + clean
+	}
+	return "/uploads/" + clean
 }
 
 // CheckIn (Strict: Location Required)
@@ -229,7 +281,21 @@ func (h *AttendanceHandler) GetToday(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	today := time.Now().Format("2006-01-02")
+	now := time.Now()
+	today := now.Format("2006-01-02")
+
+	// If today is an off-day (Sunday/holiday), short-circuit with friendly message
+	if isOffDay(now) {
+		utils.RespondSuccess(w, "Office closed today", map[string]interface{}{
+			"checked_in": false,
+			"off_day":    true,
+			"date":       today,
+			"status":     "off",
+			"message":    "Tidak ada jadwal kantor!",
+			"note":       "Selamat beristirahat!",
+		})
+		return
+	}
 
 	// Temporary SQL Null variables for scanning
 	var (
@@ -256,6 +322,47 @@ func (h *AttendanceHandler) GetToday(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if err == sql.ErrNoRows {
+		cfg := config.Loaded
+		targetTime, _ := time.Parse("15:04:05", cfg.Office.CheckInTime)
+		hardLimit := time.Date(now.Year(), now.Month(), now.Day(),
+			targetTime.Hour(), targetTime.Minute(), 0, 0, now.Location()).
+			Add(time.Duration(cfg.Office.LateToleranceMinutes) * time.Minute)
+
+		// If yesterday has no record, log it as absent (a full day passed) unless off-day
+		yesterday := now.AddDate(0, 0, -1)
+		if !isOffDay(yesterday) {
+			yesterdayStr := yesterday.Format("2006-01-02")
+			var yID int64
+			if yErr := h.db.QueryRow("SELECT id FROM attendances WHERE intern_id = ? AND date = ?", internID, yesterdayStr).Scan(&yID); yErr == sql.ErrNoRows {
+				_, _ = h.db.Exec(`INSERT INTO attendances (intern_id, date, status, created_at) VALUES (?, ?, 'absent', NOW())`,
+					internID, yesterdayStr)
+			}
+		}
+
+		// If today is weekend/holiday, show off-day message
+		if isOffDay(now) {
+			utils.RespondSuccess(w, "Office closed today", map[string]interface{}{
+				"checked_in": false,
+				"off_day":    true,
+				"date":       today,
+				"status":     "off",
+				"message":    "Tidak ada jadwal kantor!",
+				"note":       "Selamat beristirahat!",
+			})
+			return
+		}
+
+		// For today, if window closed, show closed flag but do NOT insert yet
+		if now.After(hardLimit) {
+			utils.RespondSuccess(w, "Attendance closed", map[string]interface{}{
+				"checked_in":   false,
+				"closed_today": true,
+				"date":         today,
+				"status":       "absent",
+			})
+			return
+		}
+
 		utils.RespondSuccess(w, "No attendance record", map[string]interface{}{"checked_in": false})
 		return
 	}
@@ -276,6 +383,9 @@ func (h *AttendanceHandler) GetToday(w http.ResponseWriter, r *http.Request) {
 	a.Notes = sqlNullStringToPointer(notes)
 	a.DistanceMeters = sqlNullIntToPointer(dist)
 	a.ProofFile = sqlNullStringToPointer(proof)
+	if a.ProofFile != nil {
+		*a.ProofFile = prependUpload(*a.ProofFile)
+	}
 
 	utils.RespondSuccess(w, "Today's attendance", map[string]interface{}{
 		"checked_in": true,
@@ -403,6 +513,9 @@ func (h *AttendanceHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		a.Notes = sqlNullStringToPointer(notes)
 		a.DistanceMeters = sqlNullIntToPointer(dist)
 		a.ProofFile = sqlNullStringToPointer(proof)
+		if a.ProofFile != nil {
+			*a.ProofFile = prependUpload(*a.ProofFile)
+		}
 		if internName.Valid {
 			a.InternName = internName.String
 		}
@@ -476,6 +589,9 @@ func (h *AttendanceHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	a.Notes = sqlNullStringToPointer(notes)
 	a.DistanceMeters = sqlNullIntToPointer(dist)
 	a.ProofFile = sqlNullStringToPointer(proof)
+	if a.ProofFile != nil {
+		*a.ProofFile = prependUpload(*a.ProofFile)
+	}
 	if internName.Valid {
 		a.InternName = internName.String
 	}

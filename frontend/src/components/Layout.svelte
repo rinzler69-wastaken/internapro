@@ -33,6 +33,41 @@
   });
 </script>
 
+<style>
+  .app-container {
+    min-height: 100vh;
+  }
+
+  .main-content {
+    /* Space for fixed topbar at the top */
+    padding-top: 108px;
+    
+    /* Smooth transition when sidebar expands/collapses */
+    transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    
+    min-height: 100vh;
+  }
+
+  /* Desktop: offset for expanded sidebar */
+  @media (min-width: 901px) {
+    .main-content {
+      margin-left: 256px; /* Expanded sidebar width */
+    }
+    
+    /* When sidebar is collapsed */
+    .app-container.sidebar-collapsed .main-content {
+      margin-left: 80px; /* Collapsed sidebar width */
+    }
+  }
+
+  /* Mobile: no sidebar offset */
+  @media (max-width: 900px) {
+    .main-content {
+      margin-left: 0;
+    }
+  }
+</style>
+
 <div class="app-container font-inter" class:sidebar-collapsed={!isMobile && $isSidebarCollapsed}>
   <Sidebar />
   <main class="main-content">

@@ -28,6 +28,12 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get token from Authorization header
 		authHeader := r.Header.Get("Authorization")
+		// Fallback: allow token to be passed as query param (useful for images/files)
+		if authHeader == "" {
+			if token := r.URL.Query().Get("token"); token != "" {
+				authHeader = "Bearer " + token
+			}
+		}
 		if authHeader == "" {
 			utils.RespondUnauthorized(w, "Missing authorization header")
 			return

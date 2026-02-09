@@ -478,12 +478,36 @@ func (h *InternHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	internID, _ := strconv.ParseInt(vars["id"], 10, 64)
 
-	if _, err := h.db.Exec("DELETE FROM interns WHERE id = ?", internID); err != nil {
-		utils.RespondInternalError(w, "Failed to delete intern")
+	// Get related user_id so we can remove credentials as well
+	var userID int64
+	if err := h.db.QueryRow("SELECT user_id FROM interns WHERE id = ?", internID).Scan(&userID); err != nil {
+		if err == sql.ErrNoRows {
+			utils.RespondNotFound(w, "Intern not found")
+			return
+		}
+		utils.RespondInternalError(w, "Failed to find intern")
 		return
 	}
 
-	utils.RespondSuccess(w, "Intern deleted", nil)
+	tx, err := h.db.Begin()
+	if err != nil {
+		utils.RespondInternalError(w, "Failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	// Delete user first (cascades to interns via FK ON DELETE CASCADE)
+	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", userID); err != nil {
+		utils.RespondInternalError(w, "Failed to delete user")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		utils.RespondInternalError(w, "Failed to commit deletion")
+		return
+	}
+
+	utils.RespondSuccess(w, "Intern and credentials deleted", nil)
 }
 
 // Helpers

@@ -2,6 +2,8 @@ import { auth } from './auth.svelte.js';
 
 const API_BASE = '/api';
 
+// --- HELPER FUNCTIONS ---
+
 async function request(endpoint, options = {}) {
   const isFormData = options.body instanceof FormData;
 
@@ -43,14 +45,56 @@ async function download(endpoint, params = {}) {
   if (!res.ok) throw new Error('Download failed');
   const blob = await res.blob();
   const disposition = res.headers.get('Content-Disposition') || '';
-  const match = disposition.match(/filename=\"?([^\";]+)\"?/);
+  const match = disposition.match(/filename="?([^";]+)"?/);
   const filename = match?.[1] || 'download.xlsx';
   return { blob, filename };
 }
 
+// --- API OBJECT EXPORT ---
+
 export const api = {
-  // Auth
+  // ==========================================
+  // GENERIC HELPERS (Supaya api.post jalan)
+  // ==========================================
+  async get(endpoint, params = {}) {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) searchParams.append(key, String(value));
+    });
+    const query = searchParams.toString();
+    return request(`${endpoint}${query ? `?${query}` : ''}`);
+  },
+
+  async post(endpoint, body) {
+    return request(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  async put(endpoint, body) {
+    return request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+
+  async delete(endpoint) {
+    return request(endpoint, { method: 'DELETE' });
+  },
+
+  async patch(endpoint, body) {
+    return request(endpoint, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  },
+
+  // ==========================================
+  // AUTH
+  // ==========================================
   async login(email, password, totpCode = null) {
+    // Go backend biasanya expect snake_case "totp_code"
     const data = await request('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password, totp_code: totpCode }),
@@ -90,23 +134,31 @@ export const api = {
     }
   },
 
-  // Profile
-  async getProfile() {
-    return request('/profile');
+  // ==========================================
+  // ADMIN & INTERN MANAGEMENT
+  // ==========================================
+  
+  // Dashboard Statistic
+  async getAdminDashboard() {
+    return request('/admin/dashboard'); 
   },
-  async updateProfile(formData) {
-    return request('/profile', {
-      method: 'PUT',
-      body: formData,
+  
+  async updateInternStatus(id, status) {
+    return request(`/interns/${id}`, { 
+        method: 'PUT', 
+        body: JSON.stringify({ status }) 
     });
   },
-  async updatePassword(payload) {
-    return request('/profile/password', { method: 'PUT', body: JSON.stringify(payload) });
-  },
 
-  // Interns
+  // ==========================================
+  // INTERNS (CRUD sesuai intern.go)
+  // ==========================================
   async getInterns(params = {}) {
-    const query = new URLSearchParams(params).toString();
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) searchParams.append(key, String(value));
+    });
+    const query = searchParams.toString();
     return request(`/interns${query ? `?${query}` : ''}`);
   },
   async getIntern(id) {
@@ -122,7 +174,25 @@ export const api = {
     return request(`/interns/${id}`, { method: 'DELETE' });
   },
 
-  // Supervisors
+  // ==========================================
+  // PROFILE
+  // ==========================================
+  async getProfile() {
+    return request('/profile');
+  },
+  async updateProfile(formData) {
+    return request('/profile', {
+      method: 'PUT',
+      body: formData, // FormData handle content-type automatically in helper
+    });
+  },
+  async updatePassword(payload) {
+    return request('/profile/password', { method: 'PUT', body: JSON.stringify(payload) });
+  },
+
+  // ==========================================
+  // SUPERVISORS
+  // ==========================================
   async getSupervisors(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/supervisors${query ? `?${query}` : ''}`);
@@ -143,11 +213,34 @@ export const api = {
     return request(`/supervisors/${id}/reject`, { method: 'POST' });
   },
 
-  // Tasks
-  async getTasks(params = {}) {
-    const query = new URLSearchParams(params).toString();
+  // ==========================================
+  // TASKS
+  // ==========================================
+  async getTasks(arg1, arg2) {
+    let params = {};
+    if (arg1 && typeof arg1 === 'object') {
+        params = { ...arg1 };
+    } else {
+        if (arg1) params.intern_id = arg1; 
+        params.page = arg2 || 1;
+    }
+    
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+            searchParams.append(key, String(value));
+        }
+    });
+    
+    const query = searchParams.toString();
+
+    if (params.intern_id) {
+        return request(`/tasks/intern/${params.intern_id}?page=${params.page || 1}`);
+    }
+    
     return request(`/tasks${query ? `?${query}` : ''}`);
   },
+
   async getTask(id) {
     return request(`/tasks/${id}`);
   },
@@ -172,6 +265,7 @@ export const api = {
   async uploadTaskAttachment(id, file) {
     const formData = new FormData();
     formData.append('file', file);
+    // Use manual fetch for attachment to avoid request helper override content-type
     const res = await fetch(`${API_BASE}/tasks/${id}/attachments`, {
       method: 'POST',
       headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
@@ -190,7 +284,9 @@ export const api = {
     return request(`/task-assignments/${id}`);
   },
 
-  // Attendance
+  // ==========================================
+  // ATTENDANCE
+  // ==========================================
   async checkIn(latitude, longitude, reason = null) {
     const body = { latitude, longitude };
     if (reason) body.reason = reason;
@@ -204,6 +300,7 @@ export const api = {
     Object.entries(payload).forEach(([key, value]) => {
       if (value !== null && value !== undefined) formData.append(key, value);
     });
+    // Use manual fetch for formdata
     const res = await fetch(`${API_BASE}/attendance/permission`, {
       method: 'POST',
       headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
@@ -218,12 +315,17 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return request(`/attendance${query ? `?${query}` : ''}`);
   },
+  async getAttendanceById(id) {
+    return request(`/attendance/${id}`);
+  },
   async getAttendanceByIntern(id, params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/attendance/intern/${id}${query ? `?${query}` : ''}`);
   },
 
-  // Leaves
+  // ==========================================
+  // LEAVES
+  // ==========================================
   async getLeaveRequests(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/leaves${query ? `?${query}` : ''}`);
@@ -238,7 +340,9 @@ export const api = {
     return request(`/leaves/${id}/reject`, { method: 'POST' });
   },
 
-  // Assessments
+  // ==========================================
+  // ASSESSMENTS
+  // ==========================================
   async getAssessments(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/assessments${query ? `?${query}` : ''}`);
@@ -253,7 +357,9 @@ export const api = {
     return request(`/assessments/${id}`, { method: 'DELETE' });
   },
 
-  // Reports
+  // ==========================================
+  // REPORTS
+  // ==========================================
   async getReports(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/reports${query ? `?${query}` : ''}`);
@@ -268,7 +374,9 @@ export const api = {
     return request(`/reports/intern/${id}`);
   },
 
-  // Notifications
+  // ==========================================
+  // NOTIFICATIONS
+  // ==========================================
   async getNotifications(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/notifications${query ? `?${query}` : ''}`);
@@ -283,7 +391,9 @@ export const api = {
     return request(`/notifications/${id}`, { method: 'DELETE' });
   },
 
-  // Export/Import
+  // ==========================================
+  // EXPORT/IMPORT
+  // ==========================================
   async exportInterns(params = {}) {
     return download('/export/interns', params);
   },
@@ -308,7 +418,9 @@ export const api = {
     return res.json();
   },
 
-  // Analytics / Dashboard Data
+  // ==========================================
+  // ANALYTICS / DASHBOARD
+  // ==========================================
   async getInternDashboardData() {
     return request('/analytics/dashboard/intern');
   },
@@ -330,7 +442,7 @@ export const api = {
     return request('/settings', { method: 'POST', body: JSON.stringify(payload) });
   },
 
-  // Analytics
+  // Analytics Specific
   async getWeeklyTrends(internId, weekOffset = 0) {
     return request(`/analytics/trends/weekly/${internId}?week_offset=${weekOffset}`);
   },
@@ -348,4 +460,5 @@ export const api = {
   },
 };
 
+// Export request if needed elsewhere
 export { request };

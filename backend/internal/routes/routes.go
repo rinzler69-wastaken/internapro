@@ -37,6 +37,11 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	api.HandleFunc("/auth/password/forgot", passwordResetHandler.RequestReset).Methods("POST")
 	api.HandleFunc("/auth/password/reset", passwordResetHandler.Reset).Methods("POST")
 
+	// --- NEW: Route Pendaftaran Magang (Public) ---
+	// Endpoint ini bisa diakses tanpa login untuk pendaftaran mandiri
+	api.HandleFunc("/internship/register", internHandler.Register).Methods("POST")
+	api.HandleFunc("/supervisors", supervisorHandler.GetAllPublic).Methods("GET")
+
 	// Protected
 	protected := api.PathPrefix("").Subrouter()
 	protected.Use(middleware.AuthMiddleware)
