@@ -134,12 +134,14 @@ CREATE TABLE report (
 
 CREATE TABLE setting (
   i_d BIGINT NOT NULL,
-  key VARCHAR(255) NOT NULL,
-  value VARCHAR(255) NOT NULL,
+  `key` VARCHAR(255) NOT NULL,
+  `value` VARCHAR(255) NOT NULL,
   type VARCHAR(255) NOT NULL,
   description VARCHAR(255) NOT NULL,
   created_at TIMESTAMP NOT NULL,
-  updated_at TIMESTAMP NOT NULL
+  updated_at TIMESTAMP NOT NULL,
+  PRIMARY KEY (i_d),
+  UNIQUE KEY uk_setting_key (`key`)
 );
 
 CREATE TABLE task (
@@ -241,4 +243,3 @@ CREATE TABLE institution (
   created_at TIMESTAMP NOT NULL,
   updated_at TIMESTAMP NOT NULL
 );
-
