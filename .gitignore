@@ -9,6 +9,8 @@ dist/
 # SvelteKit
 .svelte-kit/
 
+backend/uploads/
+
 # Environment variables
 .env
 .env.*
