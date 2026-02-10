@@ -23,3 +23,12 @@ export UPLOAD_DIR="${UPLOAD_DIR:-$ROOT/uploads}"
 # We skip building here because we'll do that in the 'Build Command' stage
 echo "==> Launching server on port $SERVER_PORT"
 exec "$ROOT/bin/server"
+
+# Check if the binary exists before trying to run it
+if [ ! -f "$ROOT/bin/server" ]; then
+    echo "ERROR: Binary not found at $ROOT/bin/server"
+    exit 1
+fi
+
+echo "==> Launching server on port $SERVER_PORT"
+exec "$ROOT/bin/server"
