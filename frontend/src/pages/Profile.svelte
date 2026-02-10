@@ -36,9 +36,9 @@
 
   let assessmentData = $state(null);
 
-  let taskChartEl;
-  let attendanceChartEl;
-  let radarChartEl;
+  let taskChartEl = $state(null);
+  let attendanceChartEl = $state(null);
+  let radarChartEl = $state(null);
   let taskChart, attendanceChart, radarChart;
 
   /** @type {import('chart.js').ChartOptions<'doughnut'>} */
@@ -466,7 +466,7 @@
     {:else if error}
       <div class="error-card">
         <p>{error}</p>
-        <button class="btn primary" on:click={load}>Coba Lagi</button>
+        <button class="btn primary" onclick={load}>Coba Lagi</button>
       </div>
     {:else}
       <div class="card hero">
@@ -648,13 +648,6 @@
     gap: 12px;
   }
 
-  .title-stack h1 {
-    margin: 4px 0 6px;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-
   .eyebrow {
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -792,8 +785,7 @@
   }
   }
 
-  .joined .muted,
-  .joined .big {
+  .joined .muted {
     margin: 0;
   }
 

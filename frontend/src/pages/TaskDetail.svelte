@@ -335,7 +335,7 @@
 
                               {#if task.submission_method === 'links' || task.submission_method === 'both' || !task.submission_method}
                                 <div class="form-group mb-4">
-                                    <label class="label">Lampiran Link</label>
+                                    <p class="label">Lampiran Link</p>
                                     {#each links as link, index}
                                         <div class="link-row mb-2">
                                             <input class="input-field" placeholder="Judul (mis: Github)" bind:value={link.label} />
@@ -351,7 +351,7 @@
 
                               {#if task.submission_method === 'files' || task.submission_method === 'both'}
                                 <div class="form-group mb-4">
-                                    <label class="label">Unggah File</label>
+                                    <p class="label">Unggah File</p>
                                     <div class="file-input-wrapper">
                                       <input 
                                         type="file" 
@@ -381,7 +381,7 @@
                           </div>
                           <div class="card-body">
                               <div class="form-group mb-4">
-                                  <label class="label">Keputusan</label>
+                                  <p class="label">Keputusan</p>
                                   <div class="radio-group">
                                       <label class={`radio-btn ${reviewAction === 'approve' ? 'active-green' : ''}`}>
                                           <input type="radio" value="approve" bind:group={reviewAction} hidden>

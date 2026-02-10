@@ -21,7 +21,7 @@
   // Keep overlay-root click-through state in sync with our modals
   $effect(() => {
     const root = typeof document !== 'undefined' ? document.querySelector('#overlay-root') : null;
-    if (!root) return;
+    if (!(root instanceof HTMLElement)) return;
     const hasModal = showCreateModal || showEditModal;
     root.style.pointerEvents = hasModal ? 'auto' : 'none';
     if (!hasModal) {
@@ -678,19 +678,6 @@
 
   .table-card {
     padding: 0; 
-  }
-
-  .card-header {
-    margin-bottom: 20px;
-    border-bottom: 1px solid #f3f4f6;
-    padding-bottom: 15px;
-  }
-
-  .card-header h4 {
-    margin: 0;
-    font-size: 1.15rem;
-    font-weight: 600;
-    color: #111827;
   }
 
   .text-muted {

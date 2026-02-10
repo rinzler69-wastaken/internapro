@@ -108,19 +108,19 @@
         <div class="card-body">
           <div class="form-grid">
             <div class="form-group full-width">
-              <label class="label">Judul Tugas</label>
-              <input class="input-field" bind:value={form.title} placeholder="Masukkan judul tugas..." />
+              <label class="label" for="title">Judul Tugas</label>
+              <input id="title" class="input-field" bind:value={form.title} placeholder="Masukkan judul tugas..." />
             </div>
 
             <div class="form-group full-width">
-              <label class="label">Deskripsi & Instruksi</label>
-              <textarea class="input-field textarea" rows="5" bind:value={form.description} placeholder="Berikan instruksi detail..."></textarea>
+              <label class="label" for="description">Deskripsi & Instruksi</label>
+              <textarea id="description" class="input-field textarea" rows="5" bind:value={form.description} placeholder="Berikan instruksi detail..."></textarea>
             </div>
 
             {#if auth.user?.role !== 'intern'}
               <div class="form-group">
-                <label class="label">Intern</label>
-                <select class="input-field" bind:value={form.intern_id}>
+                <label class="label" for="internSelect">Intern</label>
+                <select id="internSelect" class="input-field" bind:value={form.intern_id}>
                   <option value="">Pilih Intern</option>
                   {#each interns as intern}
                     <option value={intern.id}>{intern.full_name || intern.name}</option>
@@ -130,8 +130,8 @@
             {/if}
 
             <div class="form-group">
-              <label class="label">Prioritas</label>
-              <select class="input-field" bind:value={form.priority}>
+              <label class="label" for="priority">Prioritas</label>
+              <select id="priority" class="input-field" bind:value={form.priority}>
                 <option value="low">Low</option>
                 <option value="medium">Mid</option>
                 <option value="high">High</option>
@@ -139,8 +139,8 @@
             </div>
 
             <div class="form-group">
-              <label class="label">Metode Pengumpulan</label>
-              <select class="input-field" bind:value={form.submission_method}>
+              <label class="label" for="submissionMethod">Metode Pengumpulan</label>
+              <select id="submissionMethod" class="input-field" bind:value={form.submission_method}>
                 <option value="links">Hanya Link</option>
                 <option value="files">Hanya File</option>
                 <option value="both">Link & File</option>
@@ -148,18 +148,18 @@
             </div>
 
             <div class="form-group">
-              <label class="label">Tanggal Mulai</label>
-              <input type="date" class="input-field" bind:value={form.start_date} />
+              <label class="label" for="startDate">Tanggal Mulai</label>
+              <input id="startDate" type="date" class="input-field" bind:value={form.start_date} />
             </div>
 
             <div class="form-group">
-              <label class="label">Deadline</label>
-              <input type="date" class="input-field" bind:value={form.deadline} />
+              <label class="label" for="deadline">Deadline</label>
+              <input id="deadline" type="date" class="input-field" bind:value={form.deadline} />
             </div>
 
             <div class="form-group">
-              <label class="label">Waktu Deadline</label>
-              <input type="time" class="input-field" bind:value={form.deadline_time} />
+              <label class="label" for="deadlineTime">Waktu Deadline</label>
+              <input id="deadlineTime" type="time" class="input-field" bind:value={form.deadline_time} />
             </div>
           </div>
 

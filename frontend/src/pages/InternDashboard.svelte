@@ -68,7 +68,7 @@
   let permissionStatus = $state('sick');
   let permissionNotes = $state('');
   let permissionFile = $state(null);
-  let fileInput; 
+  let fileInput = $state(null); 
 
     let isSubmittingPermission = $state(false); // Khusus Kirim Izin
 
@@ -1222,7 +1222,13 @@ const canCheckIn = $derived(
 
 <!-- Late Reason Modal -->
 {#if showLateModal}
-  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onclick={(e) => e.target === e.currentTarget && (showLateModal = false)}>
+  <div
+    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+    role="button"
+    tabindex="0"
+    onclick={(e) => e.target === e.currentTarget && (showLateModal = false)}
+    onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (showLateModal = false)}
+  >
     <div class="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
       <h3 class="text-xl font-bold text-slate-800 mb-4">Alasan Terlambat</h3>
       <p class="text-sm text-slate-600 mb-4">Anda terlambat. Mohon berikan alasan:</p>
@@ -1245,7 +1251,13 @@ const canCheckIn = $derived(
 
 <!-- Permission Modal -->
 {#if showPermissionModal}
-  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onclick={(e) => e.target === e.currentTarget && (showPermissionModal = false)}>
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+    role="button"
+    tabindex="0"
+    onclick={(e) => e.target === e.currentTarget && (showPermissionModal = false)}
+    onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (showPermissionModal = false)}
+  >
     <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity"></div>
     
     <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col overflow-hidden">

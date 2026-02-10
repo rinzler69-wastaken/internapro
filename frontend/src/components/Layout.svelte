@@ -5,7 +5,7 @@
   import { isSidebarCollapsed } from '../lib/ui.store.js';
 
   const { children } = $props();
-  let isMobile = false;
+  let isMobile = $state(false);
 
   onMount(() => {
     try {

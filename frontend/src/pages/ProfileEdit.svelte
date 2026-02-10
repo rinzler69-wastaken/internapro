@@ -11,7 +11,7 @@
   // Profile State
   let avatarFile = $state(null);
   let avatarPreview = $state(null);
-  let fileInput; // Referensi elemen input
+  let fileInput = $state(null); // Referensi elemen input
   let form = $state({ name: '', email: '' });
 
   // Password State
@@ -372,12 +372,6 @@
     letter-spacing: -0.02em; 
   }
   
-  .subtitle { 
-    color: #64748b; 
-    font-size: 14px; 
-    margin: 0; 
-  }
-  
   .title-stack { 
     display: flex; 
     flex-direction: column; 
@@ -649,12 +643,6 @@
     transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
   }
   
-  .btn.primary {
-    color: oklch(12.9% 0.042 264.695);
-    background: oklch(96.8% 0.007 247.896);
-    border-color: oklch(82.3% 0.034 264.695);
-  }
-  
   .btn.ghost {
     background: #fff;
     border: 2px solid #e2e8f0;
@@ -662,13 +650,6 @@
     font-weight: 600;
   }
 
-  .btn-ghost-icon {
-    /* display: none; */
-    font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 48;
-    color: #0f172a;
-    cursor: pointer;
-  }
-  
   .btn:hover:not(:disabled) { 
     transform: translateY(-1px); 
   }
@@ -695,25 +676,8 @@
     box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
     transition: all 0.2s;
   }
-  
-  .btn-outline {
-    background: #fff;
-    color: #475569;
-    border: 1px solid #cbd5e1;
-    padding: 8px;
-    border-radius: 999px;
-    font-weight: 600;
-    font-size: 14px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    transition: all 0.2s;
-  }
-  
+ 
   .btn-primary:hover:not(:disabled),
-  .btn-outline:hover:not(:disabled),
   .btn-blue:hover:not(:disabled) { 
     transform: box-shadow 0.2s, background 0.2s;
     box-shadow: 0 6px 20px rgba(16, 185, 129, 0.2);
@@ -742,24 +706,6 @@
   /* UTILS */
   .w-full { 
     width: 100%; 
-  }
-  
-  .grid { 
-    display: grid; 
-  }
-  
-  .grid-cols-1 { 
-    grid-template-columns: repeat(1, minmax(0, 1fr)); 
-  }
-  
-  .sm\:grid-cols-2 { 
-    @media (min-width: 640px) { 
-      grid-template-columns: repeat(2, minmax(0, 1fr)); 
-    } 
-  }
-  
-  .gap-4 { 
-    gap: 16px; 
   }
 
   .spinner { 

@@ -164,8 +164,8 @@
                     </div>
                     <!-- Indicator Average (Readonly) -->
                     <div class="form-group">
-                        <label class="label muted">Rata-rata</label>
-                        <div class="average-display">
+                        <p class="label muted">Rata-rata</p>
+                        <div class="average-display" aria-live="polite">
                             {(
                                 (Number(form.quality_score) + Number(form.speed_score) + Number(form.initiative_score) + Number(form.teamwork_score) + Number(form.communication_score)) / 5
                             ).toFixed(1)}
@@ -256,7 +256,7 @@
                                 </span>
                             </td>
                             <td class="text-right">
-                                <button class="btn-icon">
+                                <button class="btn-icon" aria-label={`Aksi untuk ${item.intern_name || 'penilaian'}`}>
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
                                 </button>
                             </td>

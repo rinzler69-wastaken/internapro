@@ -1,10 +1,10 @@
 <script>
   import { onMount } from 'svelte';
-  import { route, replace } from '@mateothegreat/svelte5-router';
+  import { replace } from '@mateothegreat/svelte5-router';
   import { api } from '../lib/api.js';
   import { auth } from '../lib/auth.svelte.js';
 
-  const params = $derived(route.params);
+  let { id } = $props();
   let loading = $state(true);
   let error = $state('');
   let data = $state(null);
@@ -23,6 +23,17 @@
     return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   }
 
+  function withBase(url) {
+    if (!url) return '';
+    const needsToken = url.startsWith('/uploads') || url.startsWith('uploads/');
+    const token = auth.token;
+    const tokenQS = needsToken && token ? `${url.includes('?') ? '&' : '?'}token=${token}` : '';
+    if (url.startsWith('http')) return `${url}${tokenQS}`;
+    const base = import.meta.env.VITE_API_URL || '';
+    const normalized = url.startsWith('/') ? url : `/${url}`;
+    return `${base}${normalized}${tokenQS}`;
+  }
+
   function statusBadge(status) {
     switch (status) {
       case 'present': return { text: 'Hadir', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
@@ -38,7 +49,7 @@
     loading = true;
     error = '';
     try {
-      const res = await api.getAttendanceById(params.id);
+      const res = await api.getAttendanceById(id);
       data = res.data;
     } catch (err) {
       error = err.message || 'Gagal memuat presensi';
@@ -120,7 +131,7 @@
           <div>
             <p class="label">Bukti Izin</p>
             {#if data.proof_file}
-              <a class="link" href={data.proof_file} target="_blank" rel="noreferrer">Lihat Dokumen</a>
+              <a class="link" href={withBase(data.proof_file)} target="_blank" rel="noreferrer">Lihat Dokumen</a>
             {:else}
               <p class="value muted">Tidak ada file</p>
             {/if}

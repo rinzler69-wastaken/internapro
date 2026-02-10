@@ -232,28 +232,34 @@
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div class="form-group mb-0 sm:col-span-2">
-                    <label class="form-label">Nama Lengkap <span class="text-rose-500">*</span></label>
-                    <input type="text" bind:value={name} class="input-field" placeholder="Masukkan nama lengkap" required>
+                    <label class="form-label" for="fullName">Nama Lengkap <span class="text-rose-500">*</span></label>
+                    <input id="fullName" type="text" bind:value={name} class="input-field" placeholder="Masukkan nama lengkap" required>
                 </div>
 
                 <div class="form-group mb-0 sm:col-span-2">
-                    <label class="form-label">Email <span class="text-rose-500">*</span></label>
-                    <input type="email" bind:value={email} class="input-field" placeholder="email@example.com" required disabled={isGoogleRedirect && email.length > 0}>
+                    <label class="form-label" for="email">Email <span class="text-rose-500">*</span></label>
+                    <input id="email" type="email" bind:value={email} class="input-field" placeholder="email@example.com" required disabled={isGoogleRedirect && email.length > 0}>
                 </div>
 
                 <div class="form-group mb-0">
-                    <label class="form-label">Password <span class="text-rose-500">*</span></label>
+                    <label class="form-label" for="password">Password <span class="text-rose-500">*</span></label>
                     <div class="password-wrapper">
-                        <input type={showPassword ? 'text' : 'password'} bind:value={password} id="password" class="input-field" placeholder="Minimal 8 karakter" required>
-                        <button type="button" class="toggle-password" onclick={() => showPassword = !showPassword}>
+                        <input id="password" type={showPassword ? 'text' : 'password'} bind:value={password} class="input-field" placeholder="Minimal 8 karakter" required>
+                        <button
+                          type="button"
+                          class="toggle-password"
+                          aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                          title={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                          onclick={() => showPassword = !showPassword}
+                        >
                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </button>
                     </div>
                 </div>
 
                 <div class="form-group mb-0">
-                    <label class="form-label">Konfirmasi Password <span class="text-rose-500">*</span></label>
-                     <input type="password" bind:value={confirmPassword} class="input-field" placeholder="Ulangi password" required>
+                    <label class="form-label" for="confirmPassword">Konfirmasi Password <span class="text-rose-500">*</span></label>
+                    <input id="confirmPassword" type="password" bind:value={confirmPassword} class="input-field" placeholder="Ulangi password" required>
                 </div>
             </div>
         </div>
@@ -275,14 +281,29 @@
                 </div>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="form-group mb-0"><label class="form-label">NISN / NIM</label><input type="text" bind:value={nis} class="input-field" placeholder="Nomor induk"></div>
-                <div class="form-group mb-0"><label class="form-label">WhatsApp / Telepon</label><input type="text" bind:value={phone} class="input-field" placeholder="08xxxxxxxxxx"></div>
-                <div class="form-group mb-0"><label class="form-label">Asal Sekolah / Kampus <span class="text-rose-500">*</span></label><input type="text" bind:value={school} class="input-field" placeholder="Nama instansi pendidikan" required></div>
-                <div class="form-group mb-0"><label class="form-label">Jurusan / Bidang Studi <span class="text-rose-500">*</span></label><input type="text" bind:value={department} class="input-field" placeholder="Contoh: RPL, TKJ" required></div>
-                <div class="form-group mb-0 sm:col-span-2"><label class="form-label">Alamat</label><textarea bind:value={address} class="input-field" rows="2" placeholder="Alamat tempat tinggal saat ini"></textarea></div>
+                <div class="form-group mb-0">
+                  <label class="form-label" for="nis">NISN / NIM</label>
+                  <input id="nis" type="text" bind:value={nis} class="input-field" placeholder="Nomor induk">
+                </div>
+                <div class="form-group mb-0">
+                  <label class="form-label" for="phone">WhatsApp / Telepon</label>
+                  <input id="phone" type="text" bind:value={phone} class="input-field" placeholder="08xxxxxxxxxx">
+                </div>
+                <div class="form-group mb-0">
+                  <label class="form-label" for="school">Asal Sekolah / Kampus <span class="text-rose-500">*</span></label>
+                  <input id="school" type="text" bind:value={school} class="input-field" placeholder="Nama instansi pendidikan" required>
+                </div>
+                <div class="form-group mb-0">
+                  <label class="form-label" for="department">Jurusan / Bidang Studi <span class="text-rose-500">*</span></label>
+                  <input id="department" type="text" bind:value={department} class="input-field" placeholder="Contoh: RPL, TKJ" required>
+                </div>
                 <div class="form-group mb-0 sm:col-span-2">
-                    <label class="form-label">Pembimbing</label>
-                    <select class="input-field" bind:value={supervisor_id}>
+                  <label class="form-label" for="address">Alamat</label>
+                  <textarea id="address" bind:value={address} class="input-field" rows="2" placeholder="Alamat tempat tinggal saat ini"></textarea>
+                </div>
+                <div class="form-group mb-0 sm:col-span-2">
+                    <label class="form-label" for="supervisor">Pembimbing</label>
+                    <select id="supervisor" class="input-field" bind:value={supervisor_id}>
                         <option value="">-- Pilih Pembimbing (Opsional) --</option>
                         {#each supervisors as supervisor}
                         <option value={supervisor.id}>{supervisor.name}{supervisor.institution ? ` - ${supervisor.institution}` : ''}</option>
@@ -301,8 +322,14 @@
                 </div>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                 <div class="form-group mb-0"><label class="form-label">Tanggal Mulai <span class="text-rose-500">*</span></label><input type="date" bind:value={startDate} class="input-field" required></div>
-                 <div class="form-group mb-0"><label class="form-label">Tanggal Selesai <span class="text-rose-500">*</span></label><input type="date" bind:value={endDate} class="input-field" required></div>
+                 <div class="form-group mb-0">
+                   <label class="form-label" for="startDate">Tanggal Mulai <span class="text-rose-500">*</span></label>
+                   <input id="startDate" type="date" bind:value={startDate} class="input-field" required>
+                 </div>
+                 <div class="form-group mb-0">
+                   <label class="form-label" for="endDate">Tanggal Selesai <span class="text-rose-500">*</span></label>
+                   <input id="endDate" type="date" bind:value={endDate} class="input-field" required>
+                 </div>
             </div>
         </div>
         {/if}
@@ -319,10 +346,22 @@
                 </div>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="form-group mb-0"><label class="form-label">NIP</label><input type="text" bind:value={nip} class="input-field" placeholder="Nomor Induk Pegawai"></div>
-                <div class="form-group mb-0"><label class="form-label">WhatsApp / Telepon</label><input type="text" bind:value={supervisor_phone} class="input-field" placeholder="08xxxxxxxxxx"></div>
-                <div class="form-group mb-0 sm:col-span-2"><label class="form-label">Asal Instansi <span class="text-rose-500">*</span></label><input type="text" bind:value={institution} class="input-field" placeholder="Nama perusahaan / lembaga" required></div>
-                <div class="form-group mb-0 sm:col-span-2"><label class="form-label">Alamat</label><textarea bind:value={supervisor_address} class="input-field" rows="2" placeholder="Alamat tempat tinggal saat ini"></textarea></div>
+                <div class="form-group mb-0">
+                  <label class="form-label" for="nip">NIP</label>
+                  <input id="nip" type="text" bind:value={nip} class="input-field" placeholder="Nomor Induk Pegawai">
+                </div>
+                <div class="form-group mb-0">
+                  <label class="form-label" for="supervisorPhone">WhatsApp / Telepon</label>
+                  <input id="supervisorPhone" type="text" bind:value={supervisor_phone} class="input-field" placeholder="08xxxxxxxxxx">
+                </div>
+                <div class="form-group mb-0 sm:col-span-2">
+                  <label class="form-label" for="institution">Asal Instansi <span class="text-rose-500">*</span></label>
+                  <input id="institution" type="text" bind:value={institution} class="input-field" placeholder="Nama perusahaan / lembaga" required>
+                </div>
+                <div class="form-group mb-0 sm:col-span-2">
+                  <label class="form-label" for="supervisorAddress">Alamat</label>
+                  <textarea id="supervisorAddress" bind:value={supervisor_address} class="input-field" rows="2" placeholder="Alamat tempat tinggal saat ini"></textarea>
+                </div>
             </div>
         </div>
         {/if}

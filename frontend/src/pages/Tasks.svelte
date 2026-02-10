@@ -144,15 +144,15 @@
   <section class="panel">
     <div class="filters">
       <div class="field stretch">
-        <label>Cari</label>
+        <label for="searchTasks">Cari</label>
         <div class="input-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input placeholder="Judul tugas..." bind:value={search} onkeydown={(e) => e.key === 'Enter' && fetchTasks()} />
+          <input id="searchTasks" placeholder="Judul tugas..." bind:value={search} onkeydown={(e) => e.key === 'Enter' && fetchTasks()} />
         </div>
       </div>
       <div class="field">
-        <label>Status</label>
-        <select bind:value={status}>
+        <label for="statusFilter">Status</label>
+        <select id="statusFilter" bind:value={status}>
           <option value="">Semua</option>
           <option value="pending">Pending</option>
           <option value="in_progress">Dalam Proses</option>
@@ -162,8 +162,8 @@
         </select>
       </div>
       <div class="field">
-        <label>Prioritas</label>
-        <select bind:value={priority}>
+        <label for="priorityFilter">Prioritas</label>
+        <select id="priorityFilter" bind:value={priority}>
           <option value="">Semua</option>
           <option value="low">Low</option>
           <option value="medium">Medium</option>
@@ -172,8 +172,8 @@
       </div>
       {#if auth.user?.role !== 'intern'}
         <div class="field">
-          <label>Intern</label>
-          <select bind:value={internId}>
+          <label for="internFilter">Intern</label>
+          <select id="internFilter" bind:value={internId}>
             <option value="">Semua</option>
             {#each interns as intern}
               <option value={intern.id}>{intern.full_name || intern.name}</option>
@@ -268,7 +268,13 @@
 
       <div class="mobile-list">
         {#each tasks as task}
-          <div class="card-row" onclick={() => goto(`/tasks/${task.id}`)}>
+          <div
+            class="card-row"
+            role="link"
+            tabindex="0"
+            onclick={() => goto(`/tasks/${task.id}`)}
+            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && goto(`/tasks/${task.id}`)}
+          >
             <div class="row-top">
               <div class="title-block">
                 <div class="title">{task.title}</div>

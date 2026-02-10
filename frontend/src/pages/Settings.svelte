@@ -214,32 +214,32 @@
           <div class="card-body space-y-4">
             <div class="form-grid">
               <div class="form-group">
-                <label class="label">Presensi Dibuka</label>
-                <input class="input" type="time" bind:value={attendanceForm.attendance_open_time} />
+                <label class="label" for="attendanceOpen">Presensi Dibuka</label>
+                <input id="attendanceOpen" class="input" type="time" bind:value={attendanceForm.attendance_open_time} />
                 <p class="help-text">Jam mulai sistem menerima check-in.</p>
               </div>
               <div class="form-group">
-                <label class="label">Jam Masuk</label>
-                <input class="input" type="time" bind:value={attendanceForm.check_in_time} />
+                <label class="label" for="checkInTime">Jam Masuk</label>
+                <input id="checkInTime" class="input" type="time" bind:value={attendanceForm.check_in_time} />
                 <p class="help-text">Waktu mulai absen masuk.</p>
               </div>
             </div>
             <div class="form-grid">
               <div class="form-group">
-                <label class="label">Toleransi Terlambat (menit)</label>
-                <input class="input" type="number" min="0" bind:value={attendanceForm.late_tolerance_minutes} />
+                <label class="label" for="lateTolerance">Toleransi Terlambat (menit)</label>
+                <input id="lateTolerance" class="input" type="number" min="0" bind:value={attendanceForm.late_tolerance_minutes} />
                 <p class="help-text">Menit tambahan sebelum presensi ditutup.</p>
               </div>
               <div class="form-group">
-                <label class="label">Jam Pulang</label>
-                <input class="input" type="time" bind:value={attendanceForm.check_out_time} />
+                <label class="label" for="checkOutTime">Jam Pulang</label>
+                <input id="checkOutTime" class="input" type="time" bind:value={attendanceForm.check_out_time} />
                 <p class="help-text">Waktu minimal absen pulang.</p>
               </div>
             </div>
 
             <div class="workdays-grid">
               <div class="form-group">
-                <label class="label">Hari Kerja</label>
+                <p class="label">Hari Kerja</p>
                 <div class="day-pills">
                   {#each weekdayOptions as day}
                     <button
@@ -256,10 +256,11 @@
                 <p class="help-text">Pilih hari aktif. Minggu tidak ditampilkan.</p>
               </div>
               <div class="form-group">
-                <label class="label">Liburkan Hari Ini</label>
+                <p class="label">Liburkan Hari Ini</p>
                 <div class="today-off-toggle">
                   <label class="toggle-switch">
                     <input
+                      id="todayOff"
                       type="checkbox"
                       checked={attendanceForm.manual_off_date === todayKey()}
                       onchange={handleTodayOffChange}
@@ -306,16 +307,16 @@
           <div class="card-body space-y-4">
             <div class="form-grid">
               <div class="form-group">
-                <label class="label">Latitude (Lintang)</label>
-                <input class="input" type="text" bind:value={attendanceForm.office_latitude} placeholder="-7.052xxx" />
+                <label class="label" for="office-latitude">Latitude (Lintang)</label>
+                <input id="office-latitude" class="input" type="text" bind:value={attendanceForm.office_latitude} placeholder="-7.052xxx" />
               </div>
               <div class="form-group">
-                <label class="label">Longitude (Bujur)</label>
-                <input class="input" type="text" bind:value={attendanceForm.office_longitude} placeholder="110.469xxx" />
+                <label class="label" for="office-longitude">Longitude (Bujur)</label>
+                <input id="office-longitude" class="input" type="text" bind:value={attendanceForm.office_longitude} placeholder="110.469xxx" />
               </div>
               <div class="form-group">
-                <label class="label">Radius Maksimal (meter)</label>
-                <input class="input" type="number" min="10" bind:value={attendanceForm.max_checkin_distance} />
+                <label class="label" for="max-checkin-distance">Radius Maksimal (meter)</label>
+                <input id="max-checkin-distance" class="input" type="number" min="10" bind:value={attendanceForm.max_checkin_distance} />
                 <p class="help-text">Jarak maksimal dari titik kantor untuk bisa absen.</p>
               </div>
             </div>
@@ -342,7 +343,6 @@
   .container { max-width: 1240px; margin: 0 auto; }
   .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
   .header h2 { margin: 0; font-size: 20px; font-weight: 760; }
-  .header p { margin: 4px 0 0; color: #64748b; }
 
   .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
 
@@ -412,13 +412,12 @@
   .info-desc { margin: 4px 0 0; font-size: 13px; color: #64748b; }
 
   /* PREVIEW */
-  .preview-grid { display: grid; gap: 20px; }
   .badge-heading { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
   .preview-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .divider-vertical { width: 2px; height: 40px; background: #e2e8f0; }
 
   /* UTILS */
-  .mt-4 { margin-top: 16px; } .mt-6 { margin-top: 24px; }
+  .mt-4 { margin-top: 16px; }
   .icon-circle { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
   .bg-emerald-light { background: #ecfdf5; } .text-emerald { color: #059669; }
 

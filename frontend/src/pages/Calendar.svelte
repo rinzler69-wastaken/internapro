@@ -516,13 +516,19 @@
 
                 {:else}
                   <!-- Tasks View -->
-                  {#if dayTasks.length > 0}
+                    {#if dayTasks.length > 0}
                     {#each dayTasks.slice(0, 3) as task}
-                      <button onclick={() => goto(`/tasks/${task.id}`)} class="w-full text-left hidden sm:block cursor-pointer">
+                      <div
+                        role="link"
+                        tabindex="0"
+                        onclick={() => goto(`/tasks/${task.id}`)}
+                        onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && goto(`/tasks/${task.id}`)}
+                        class="w-full text-left hidden sm:block cursor-pointer"
+                      >
                         <div class="px-1.5 py-0.5 rounded border text-[10px] font-medium truncate w-full {getPriorityColor(task.priority)} hover:ring-1 hover:ring-offset-1 hover:ring-indigo-400">
                           {task.title}
                         </div>
-                      </button>
+                      </div>
                     {/each}
                     {@const highestPriority = getHighestPriority(dayTasks)}
                     <div class="sm:hidden w-2 h-2 rounded-full {getPriorityDotColor(highestPriority)} mx-auto"></div>
@@ -803,7 +809,11 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
               Agenda
             </h3>
-            <button onclick={closeTaskModal} class="cursor-pointer w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-rose-50 hover:text-rose-500 transition-colors">
+            <button
+              onclick={closeTaskModal}
+              aria-label="Tutup modal agenda"
+              class="cursor-pointer w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-rose-50 hover:text-rose-500 transition-colors"
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>

@@ -5,12 +5,17 @@
 
   // --- STATE UMUM ---
   let loading = $state(true);
-  let user = $state({}); // Inisialisasi objek kosong agar tidak error akses properti
+  let user = $state({
+    name: '',
+    email: '',
+    avatar: '',
+    is_2fa_enabled: false,
+  });
 
   // --- STATE PROFIL ---
   let avatarFile = $state(null);
   let avatarPreview = $state(null);
-  let fileInput;
+  let fileInput = $state(null);
   let profileForm = $state({ name: '', email: '' });
   let savingProfile = $state(false);
 
@@ -40,9 +45,15 @@
     loading = true;
     try {
       const res = await api.getProfile();
-      // Fail-safe: Pastikan user selalu objek
+      // Fail-safe: Pastikan user selalu objek dengan properti dasar
       const userData = res.data?.user || res.data || auth.user || {};
-      user = userData;
+      user = {
+        name: '',
+        email: '',
+        avatar: '',
+        is_2fa_enabled: false,
+        ...userData,
+      };
       if (auth.hydrate) auth.hydrate(userData);
 
       // Isi form profil
@@ -332,8 +343,9 @@
                                 {/if}
 
                                 <div class="verify-form">
-                                    <label class="label text-center">Masukkan Kode 6 Digit</label>
+                                    <label class="label text-center" for="verify-code">Masukkan Kode 6 Digit</label>
                                     <input 
+                                        id="verify-code"
                                         type="text" 
                                         class="input-field text-center tracking-widest font-mono text-lg" 
                                         placeholder="000000" 

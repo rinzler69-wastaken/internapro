@@ -516,18 +516,6 @@
     border-color: #9ca3af;
   }
 
-  .btn-danger-outline {
-    background-color: white;
-    color: #dc2626;
-    border: 1px solid #fecaca;
-    margin-top: 1rem;
-  }
-
-  .btn-danger-outline:hover {
-    background-color: #fef2f2;
-    border-color: #dc2626;
-  }
-
   /* Google Button */
   .btn-google {
     background-color: white;
