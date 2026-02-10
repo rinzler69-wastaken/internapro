@@ -1,9 +1,24 @@
 <script>
   import { api } from '../lib/api.js';
+  import { auth } from '../lib/auth.svelte.js';
+  import { replace } from '@mateothegreat/svelte5-router';
+
+  let { intern = null } = $props();
 
   async function handleLogout() {
     await api.logout();
-    window.location.href = '/login';
+    auth.logout?.();
+    replace('/login');
+  }
+
+  function goToRegistration() {
+    const params = new URLSearchParams({
+      email: auth.user?.email || '',
+      name: auth.user?.name || '',
+      oauth: 'google',
+      status: 'unregistered'
+    }).toString();
+    replace(`/register-intern?${params}`);
   }
 </script>
 
@@ -23,8 +38,15 @@
       Akun Anda belum terdaftar sebagai siswa magang. Mohon untuk daftar terlebih dahulu atau minta bantuan ke pembimbing magang.
     </p>
     
-    <div class="flex justify-center gap-4">
-      <a href="/profile" class="btn btn-primary px-6 py-3">
+    <div class="flex flex-col sm:flex-row justify-center gap-4">
+      <button onclick={goToRegistration} class="btn btn-primary px-6 py-3">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-2">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+        Lengkapi Pendaftaran
+      </button>
+      
+      <a href="/profile" class="btn btn-outline px-6 py-3">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline mr-2">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
           <circle cx="12" cy="7" r="4"/>

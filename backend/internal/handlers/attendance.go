@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"dsi_interna_sys/internal/config"
+	"dsi_interna_sys/internal/holiday"
 	"dsi_interna_sys/internal/middleware"
 	"dsi_interna_sys/internal/models"
 	"dsi_interna_sys/internal/utils"
@@ -20,8 +22,227 @@ type AttendanceHandler struct {
 	db *sql.DB
 }
 
+// local wrapper to keep existing calls
+func normalizeRole(role string) string {
+	return middleware.NormalizeRole(role)
+}
+
+var holidayCache = struct {
+	mu   sync.RWMutex
+	data map[int]map[string]bool
+}{
+	data: map[int]map[string]bool{},
+}
+
+type workCalendarConfig struct {
+	workdays      map[time.Weekday]bool
+	manualOffDate *time.Time
+}
+
+func defaultWorkdays() map[time.Weekday]bool {
+	return map[time.Weekday]bool{
+		time.Monday:    true,
+		time.Tuesday:   true,
+		time.Wednesday: true,
+		time.Thursday:  true,
+		time.Friday:    true,
+		time.Saturday:  true,
+	}
+}
+
+func parseWorkdays(val string) map[time.Weekday]bool {
+	parsed := map[time.Weekday]bool{}
+	if strings.TrimSpace(val) == "" {
+		return parsed
+	}
+
+	for _, part := range strings.Split(val, ",") {
+		p := strings.TrimSpace(strings.ToLower(part))
+		switch p {
+		case "0", "7", "sun", "sunday", "minggu":
+			parsed[time.Sunday] = true
+		case "1", "mon", "monday", "senin":
+			parsed[time.Monday] = true
+		case "2", "tue", "tuesday", "selasa":
+			parsed[time.Tuesday] = true
+		case "3", "wed", "wednesday", "rabu":
+			parsed[time.Wednesday] = true
+		case "4", "thu", "thursday", "kamis":
+			parsed[time.Thursday] = true
+		case "5", "fri", "friday", "jumat", "jum'at", "jum\u2019at":
+			parsed[time.Friday] = true
+		case "6", "sat", "saturday", "sabtu":
+			parsed[time.Saturday] = true
+		}
+	}
+	return parsed
+}
+
 func NewAttendanceHandler(db *sql.DB) *AttendanceHandler {
 	return &AttendanceHandler{db: db}
+}
+
+// getRuntimeOfficeConfig loads office settings from DB (settings table) and falls back to config.Loaded.
+// It lets admins change time/radius without restarting the service.
+func (h *AttendanceHandler) getRuntimeOfficeConfig() config.OfficeConfig {
+	cfg := config.Loaded.Office
+
+	query := "SELECT `key`, `value` FROM settings WHERE `key` IN (" +
+		"'office_latitude'," +
+		"'office_longitude'," +
+		"'max_checkin_distance'," +
+		"'office_radius'," +
+		"'attendance_open_time'," +
+		"'check_in_time'," +
+		"'check_out_time'," +
+		"'late_tolerance_minutes'," +
+		"'office_start_time'," +
+		"'office_end_time'," +
+		"'late_tolerance_time'" +
+		")"
+
+	rows, err := h.db.Query(query)
+	if err != nil {
+		return cfg
+	}
+	defer rows.Close()
+
+	m := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err == nil {
+			m[k] = v
+		}
+	}
+
+	if val, ok := m["office_latitude"]; ok {
+		if f, e := strconv.ParseFloat(val, 64); e == nil {
+			cfg.Latitude = f
+		}
+	}
+	if val, ok := m["office_longitude"]; ok {
+		if f, e := strconv.ParseFloat(val, 64); e == nil {
+			cfg.Longitude = f
+		}
+	}
+	if val, ok := m["max_checkin_distance"]; ok {
+		if f, e := strconv.ParseFloat(val, 64); e == nil {
+			cfg.Radius = f
+		}
+	}
+	if val, ok := m["office_radius"]; ok {
+		if f, e := strconv.ParseFloat(val, 64); e == nil {
+			cfg.Radius = f
+		}
+	}
+	if val, ok := m["attendance_open_time"]; ok && val != "" {
+		cfg.AttendanceOpenTime = val
+	}
+	if val, ok := m["check_in_time"]; ok && val != "" {
+		cfg.CheckInTime = val
+	} else if val, ok := m["office_start_time"]; ok && val != "" {
+		cfg.CheckInTime = val
+	}
+	if val, ok := m["check_out_time"]; ok && val != "" {
+		cfg.CheckOutTime = val
+	} else if val, ok := m["office_end_time"]; ok && val != "" {
+		cfg.CheckOutTime = val
+	}
+	if val, ok := m["late_tolerance_minutes"]; ok {
+		if i, e := strconv.Atoi(val); e == nil {
+			cfg.LateToleranceMinutes = i
+		}
+	}
+	// Fallback: derive minutes from late_tolerance_time - check_in_time
+	if cfg.LateToleranceMinutes == 0 {
+		if ltt, ok := m["late_tolerance_time"]; ok && ltt != "" {
+			if cfg.CheckInTime != "" {
+				if start, err := time.Parse("15:04", cfg.CheckInTime[:5]); err == nil {
+					if tol, err := time.Parse("15:04", ltt[:5]); err == nil {
+						diff := int(tol.Sub(start).Minutes())
+						if diff > 0 {
+							cfg.LateToleranceMinutes = diff
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return cfg
+}
+
+func (h *AttendanceHandler) getWorkCalendarConfig() workCalendarConfig {
+	cfg := workCalendarConfig{
+		workdays: defaultWorkdays(),
+	}
+
+	rows, err := h.db.Query("SELECT `key`, `value` FROM settings WHERE `key` IN ('workdays', 'manual_off_date')")
+	if err != nil {
+		return cfg
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			continue
+		}
+		switch k {
+		case "workdays":
+			if parsed := parseWorkdays(v); len(parsed) > 0 {
+				cfg.workdays = parsed
+			}
+		case "manual_off_date":
+			if strings.TrimSpace(v) != "" {
+				if t, e := time.Parse("2006-01-02", v); e == nil {
+					cfg.manualOffDate = &t
+				}
+			}
+		}
+	}
+
+	return cfg
+}
+
+func isHolidayDate(t time.Time) bool {
+	year := t.Year()
+
+	holidayCache.mu.RLock()
+	if m, ok := holidayCache.data[year]; ok {
+		defer holidayCache.mu.RUnlock()
+		_, exists := m[t.Format("2006-01-02")]
+		return exists
+	}
+	holidayCache.mu.RUnlock()
+
+	hols, _ := holiday.GetHolidays(year)
+	m := make(map[string]bool, len(hols))
+	for _, h := range hols {
+		m[h.Date] = true
+	}
+	holidayCache.mu.Lock()
+	holidayCache.data[year] = m
+	holidayCache.mu.Unlock()
+	return m[t.Format("2006-01-02")]
+}
+
+func isOffDay(t time.Time, cal workCalendarConfig) bool {
+	dateStr := t.Format("2006-01-02")
+
+	if cal.manualOffDate != nil && dateStr == cal.manualOffDate.Format("2006-01-02") {
+		return true
+	}
+
+	if cal.workdays != nil {
+		if !cal.workdays[t.Weekday()] {
+			return true
+		}
+	} else if t.Weekday() == time.Sunday {
+		return true
+	}
+
+	return isHolidayDate(t)
 }
 
 // Helpers to convert SQL Nulls to JSON Pointers
@@ -52,6 +273,20 @@ func sqlNullIntToPointer(i sql.NullInt64) *int {
 		return &val
 	}
 	return nil
+}
+
+func prependUpload(path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "http") || strings.HasPrefix(path, "/uploads/") {
+		return path
+	}
+	clean := strings.TrimLeft(path, "/")
+	if strings.HasPrefix(clean, "uploads/") {
+		return "/" + clean
+	}
+	return "/uploads/" + clean
 }
 
 // CheckIn (Strict: Location Required)
@@ -86,15 +321,22 @@ func (h *AttendanceHandler) CheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := config.Loaded
-	distance := utils.HaversineDistance(cfg.Office.Latitude, cfg.Office.Longitude, req.Latitude, req.Longitude)
-	if distance > cfg.Office.Radius {
+	workCal := h.getWorkCalendarConfig()
+	now := time.Now()
+	if isOffDay(now, workCal) {
+		utils.RespondBadRequest(w, "Office closed today")
+		return
+	}
+
+	cfg := h.getRuntimeOfficeConfig()
+	distance := utils.HaversineDistance(cfg.Latitude, cfg.Longitude, req.Latitude, req.Longitude)
+	if distance > cfg.Radius {
 		utils.RespondBadRequest(w, "You are not within the office radius.")
 		return
 	}
 	distanceMeters := int(distance + 0.5)
 
-	today := time.Now().Format("2006-01-02")
+	today := now.Format("2006-01-02")
 	var existingID int64
 	err = h.db.QueryRow("SELECT id FROM attendances WHERE intern_id = ? AND date = ?", internID, today).Scan(&existingID)
 	if err == nil {
@@ -103,13 +345,12 @@ func (h *AttendanceHandler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Time Logic
-	now := time.Now()
-	openTime, _ := time.Parse("15:04:05", cfg.Office.AttendanceOpenTime)
-	targetTime, _ := time.Parse("15:04:05", cfg.Office.CheckInTime)
+	openTime, _ := time.Parse("15:04:05", cfg.AttendanceOpenTime)
+	targetTime, _ := time.Parse("15:04:05", cfg.CheckInTime)
 
 	openLimit := time.Date(now.Year(), now.Month(), now.Day(), openTime.Hour(), openTime.Minute(), 0, 0, now.Location())
 	lateStart := time.Date(now.Year(), now.Month(), now.Day(), targetTime.Hour(), targetTime.Minute(), 0, 0, now.Location())
-	hardLimit := lateStart.Add(time.Duration(cfg.Office.LateToleranceMinutes) * time.Minute)
+	hardLimit := lateStart.Add(time.Duration(cfg.LateToleranceMinutes) * time.Minute)
 
 	if now.Before(openLimit) {
 		utils.RespondBadRequest(w, "Attendance is not open yet.")
@@ -229,7 +470,22 @@ func (h *AttendanceHandler) GetToday(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	today := time.Now().Format("2006-01-02")
+	workCal := h.getWorkCalendarConfig()
+	now := time.Now()
+	today := now.Format("2006-01-02")
+
+	// If today is an off-day (Sunday/holiday), short-circuit with friendly message
+	if isOffDay(now, workCal) {
+		utils.RespondSuccess(w, "Office closed today", map[string]interface{}{
+			"checked_in": false,
+			"off_day":    true,
+			"date":       today,
+			"status":     "off",
+			"message":    "Tidak ada jadwal kantor!",
+			"note":       "Selamat beristirahat!",
+		})
+		return
+	}
 
 	// Temporary SQL Null variables for scanning
 	var (
@@ -256,6 +512,47 @@ func (h *AttendanceHandler) GetToday(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if err == sql.ErrNoRows {
+		cfg := config.Loaded
+		targetTime, _ := time.Parse("15:04:05", cfg.Office.CheckInTime)
+		hardLimit := time.Date(now.Year(), now.Month(), now.Day(),
+			targetTime.Hour(), targetTime.Minute(), 0, 0, now.Location()).
+			Add(time.Duration(cfg.Office.LateToleranceMinutes) * time.Minute)
+
+		// If yesterday has no record, log it as absent (a full day passed) unless off-day
+		yesterday := now.AddDate(0, 0, -1)
+		if !isOffDay(yesterday, workCal) {
+			yesterdayStr := yesterday.Format("2006-01-02")
+			var yID int64
+			if yErr := h.db.QueryRow("SELECT id FROM attendances WHERE intern_id = ? AND date = ?", internID, yesterdayStr).Scan(&yID); yErr == sql.ErrNoRows {
+				_, _ = h.db.Exec(`INSERT INTO attendances (intern_id, date, status, created_at) VALUES (?, ?, 'absent', NOW())`,
+					internID, yesterdayStr)
+			}
+		}
+
+		// If today is weekend/holiday, show off-day message
+		if isOffDay(now, workCal) {
+			utils.RespondSuccess(w, "Office closed today", map[string]interface{}{
+				"checked_in": false,
+				"off_day":    true,
+				"date":       today,
+				"status":     "off",
+				"message":    "Tidak ada jadwal kantor!",
+				"note":       "Selamat beristirahat!",
+			})
+			return
+		}
+
+		// For today, if window closed, show closed flag but do NOT insert yet
+		if now.After(hardLimit) {
+			utils.RespondSuccess(w, "Attendance closed", map[string]interface{}{
+				"checked_in":   false,
+				"closed_today": true,
+				"date":         today,
+				"status":       "absent",
+			})
+			return
+		}
+
 		utils.RespondSuccess(w, "No attendance record", map[string]interface{}{"checked_in": false})
 		return
 	}
@@ -276,6 +573,9 @@ func (h *AttendanceHandler) GetToday(w http.ResponseWriter, r *http.Request) {
 	a.Notes = sqlNullStringToPointer(notes)
 	a.DistanceMeters = sqlNullIntToPointer(dist)
 	a.ProofFile = sqlNullStringToPointer(proof)
+	if a.ProofFile != nil {
+		*a.ProofFile = prependUpload(*a.ProofFile)
+	}
 
 	utils.RespondSuccess(w, "Today's attendance", map[string]interface{}{
 		"checked_in": true,
@@ -403,6 +703,9 @@ func (h *AttendanceHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		a.Notes = sqlNullStringToPointer(notes)
 		a.DistanceMeters = sqlNullIntToPointer(dist)
 		a.ProofFile = sqlNullStringToPointer(proof)
+		if a.ProofFile != nil {
+			*a.ProofFile = prependUpload(*a.ProofFile)
+		}
 		if internName.Valid {
 			a.InternName = internName.String
 		}
@@ -476,6 +779,9 @@ func (h *AttendanceHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	a.Notes = sqlNullStringToPointer(notes)
 	a.DistanceMeters = sqlNullIntToPointer(dist)
 	a.ProofFile = sqlNullStringToPointer(proof)
+	if a.ProofFile != nil {
+		*a.ProofFile = prependUpload(*a.ProofFile)
+	}
 	if internName.Valid {
 		a.InternName = internName.String
 	}

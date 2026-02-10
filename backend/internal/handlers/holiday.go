@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"net/http"
-	"strconv"
 	"dsi_interna_sys/internal/holiday"
 	"dsi_interna_sys/internal/utils"
+	"net/http"
+	"strconv"
 )
 
 func GetHolidays(w http.ResponseWriter, r *http.Request) {

@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
-	"time"
 
 	"dsi_interna_sys/internal/config"
 	"dsi_interna_sys/internal/models"
@@ -121,42 +121,17 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 	}
 
 	var user models.User
-	var errUser error
 	query := `SELECT id, name, email, role, avatar, google_id, provider, is_2fa_enabled, created_at
 	          FROM users WHERE google_id = ? OR email = ? LIMIT 1`
-	errUser = h.db.QueryRow(query, info.ID, info.Email).Scan(
+	errUser := h.db.QueryRow(query, info.ID, info.Email).Scan(
 		&user.ID, &user.Name, &user.Email, &user.Role, &user.Avatar, &user.GoogleID, &user.Provider, &user.Is2FAEnabled, &user.CreatedAt,
 	)
 
 	setupRequired := false
 	if errUser == sql.ErrNoRows {
-		// Create user
-		res, err := h.db.Exec(
-			"INSERT INTO users (name, email, role, google_id, provider, avatar) VALUES (?, ?, ?, ?, ?, ?)",
-			info.Name, info.Email, "intern", info.ID, "google", info.Picture,
-		)
-		if err != nil {
-			utils.RespondInternalError(w, "Failed to create user")
-			return
-		}
-		userID, _ := res.LastInsertId()
-		user.ID = userID
-		user.Email = info.Email
-		user.Role = "intern"
-		user.Name = sql.NullString{String: info.Name, Valid: info.Name != ""}
-		user.Avatar = sql.NullString{String: info.Picture, Valid: info.Picture != ""}
-		user.Is2FAEnabled = false
-		user.CreatedAt = time.Now()
-		setupRequired = true
-
-		// Create minimal intern profile
-		start := time.Now()
-		end := time.Now().AddDate(0, 3, 0)
-		_, _ = h.db.Exec(
-			`INSERT INTO interns (user_id, full_name, start_date, end_date, status)
-			 VALUES (?, ?, ?, ?, 'pending')`,
-			userID, info.Name, start, end,
-		)
+		// Unregistered: reject and send to manual registration
+		sendRegisterRedirect(w, r, info.Email, info.Name)
+		return
 	} else if errUser != nil {
 		utils.RespondInternalError(w, "Database error")
 		return
@@ -171,22 +146,25 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Block pending intern/supervisor
+	pendingApproval := false
 	role := normalizeRole(user.Role)
 	if role == "intern" {
 		var status string
 		if err := h.db.QueryRow("SELECT status FROM interns WHERE user_id = ?", user.ID).Scan(&status); err == nil {
-			if status == "pending" {
-				utils.RespondForbidden(w, "Account pending approval")
-				return
+			if status == "pending" || status == "" {
+				pendingApproval = true
 			}
+		} else if err == sql.ErrNoRows {
+			// No intern profile exists – treat as unregistered
+			sendRegisterRedirect(w, r, info.Email, info.Name)
+			return
 		}
 	}
 	if role == "pembimbing" {
 		var status string
 		if err := h.db.QueryRow("SELECT status FROM supervisors WHERE user_id = ?", user.ID).Scan(&status); err == nil {
 			if status == "pending" {
-				utils.RespondForbidden(w, "Account pending approval")
-				return
+				pendingApproval = true
 			}
 		}
 	}
@@ -200,12 +178,18 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 	// optional redirect to frontend
 	redirect := r.URL.Query().Get("redirect")
 	if strings.TrimSpace(redirect) != "" {
-		redirectURL := config.Loaded.OAuth.FrontendURL + redirect
-		q := "?token=" + jwtToken
-		if setupRequired {
-			q += "&setup_required=1"
+		var redirectURL string
+		if pendingApproval {
+			redirectURL = config.Loaded.OAuth.FrontendURL + "/waiting-approval"
+		} else {
+			redirectURL = config.Loaded.OAuth.FrontendURL + redirect
+			q := "?token=" + jwtToken
+			if setupRequired {
+				q += "&setup_required=1"
+			}
+			redirectURL += q
 		}
-		http.Redirect(w, r, redirectURL+q, http.StatusFound)
+		http.Redirect(w, r, redirectURL, http.StatusFound)
 		return
 	}
 
@@ -219,12 +203,23 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 			SameSite: http.SameSiteLaxMode,
 			Secure:   config.Loaded.App.Env == "production",
 		})
-		redirectURL := config.Loaded.OAuth.FrontendURL + rc.Value
-		q := "?token=" + jwtToken
-		if setupRequired {
-			q += "&setup_required=1"
+		var redirectURL string
+		if pendingApproval {
+			redirectURL = config.Loaded.OAuth.FrontendURL + "/waiting-approval"
+		} else {
+			redirectURL = config.Loaded.OAuth.FrontendURL + rc.Value
+			q := "?token=" + jwtToken
+			if setupRequired {
+				q += "&setup_required=1"
+			}
+			redirectURL += q
 		}
-		http.Redirect(w, r, redirectURL+q, http.StatusFound)
+		http.Redirect(w, r, redirectURL, http.StatusFound)
+		return
+	}
+
+	if pendingApproval {
+		utils.RespondForbidden(w, "Account pending approval")
 		return
 	}
 
@@ -234,4 +229,18 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 		Require2FA:    user.Is2FAEnabled,
 		SetupRequired: setupRequired,
 	})
+}
+
+func sendRegisterRedirect(w http.ResponseWriter, r *http.Request, email, name string) {
+	params := url.Values{}
+	if email != "" {
+		params.Set("email", email)
+	}
+	if name != "" {
+		params.Set("name", name)
+	}
+	params.Set("oauth", "google_unregistered")
+
+	redirectURL := config.Loaded.OAuth.FrontendURL + "/register?" + params.Encode()
+	http.Redirect(w, r, redirectURL, http.StatusFound)
 }

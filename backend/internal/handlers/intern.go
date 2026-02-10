@@ -170,7 +170,7 @@ func (h *InternHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	utils.RespondPaginated(w, interns, utils.CalculatePagination(page, limit, total))
+	utils.RespondPaginated(w, presentInterns(interns), utils.CalculatePagination(page, limit, total))
 }
 
 func (h *InternHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +238,7 @@ func (h *InternHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		Email:           email,
 	}
 
-	utils.RespondSuccess(w, "Intern retrieved", result)
+	utils.RespondSuccess(w, "Intern retrieved", presentIntern(result))
 }
 
 func (h *InternHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -302,20 +302,36 @@ func (h *InternHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.FullName, req.Email, nullIfEmptySQL(passwordHash),
 	)
 	if err != nil {
-		utils.RespondBadRequest(w, "Email already exists")
+		utils.RespondBadRequest(w, "Email already exists or invalid user payload")
 		return
 	}
 	userID, _ := res.LastInsertId()
+
+	// Auto-resolve Institution ID from School name if not provided
+	var institutionID *int64 = req.InstitutionID
+	if institutionID == nil && strings.TrimSpace(req.School) != "" {
+		var id int64
+		err := tx.QueryRow("SELECT id FROM institutions WHERE name = ?", req.School).Scan(&id)
+		if err == nil {
+			institutionID = &id
+		} else if err == sql.ErrNoRows {
+			res, err := tx.Exec("INSERT INTO institutions (name) VALUES (?)", req.School)
+			if err == nil {
+				lid, _ := res.LastInsertId()
+				institutionID = &lid
+			}
+		}
+	}
 
 	_, err = tx.Exec(
 		`INSERT INTO interns (user_id, institution_id, supervisor_id, full_name, nis, student_id, school, department,
 		                      phone, address, start_date, end_date, status)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		userID, nullableInt(req.InstitutionID), nullableInt(req.SupervisorID), req.FullName, req.NIS, req.StudentID,
+		userID, nullableInt(institutionID), nullableInt(req.SupervisorID), req.FullName, req.NIS, req.StudentID,
 		req.School, req.Department, req.Phone, req.Address, startDate, endDate, status,
 	)
 	if err != nil {
-		utils.RespondInternalError(w, "Failed to create intern")
+		utils.RespondBadRequest(w, "Failed to create intern: "+err.Error())
 		return
 	}
 
@@ -478,12 +494,36 @@ func (h *InternHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	internID, _ := strconv.ParseInt(vars["id"], 10, 64)
 
-	if _, err := h.db.Exec("DELETE FROM interns WHERE id = ?", internID); err != nil {
-		utils.RespondInternalError(w, "Failed to delete intern")
+	// Get related user_id so we can remove credentials as well
+	var userID int64
+	if err := h.db.QueryRow("SELECT user_id FROM interns WHERE id = ?", internID).Scan(&userID); err != nil {
+		if err == sql.ErrNoRows {
+			utils.RespondNotFound(w, "Intern not found")
+			return
+		}
+		utils.RespondInternalError(w, "Failed to find intern")
 		return
 	}
 
-	utils.RespondSuccess(w, "Intern deleted", nil)
+	tx, err := h.db.Begin()
+	if err != nil {
+		utils.RespondInternalError(w, "Failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	// Delete user first (cascades to interns via FK ON DELETE CASCADE)
+	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", userID); err != nil {
+		utils.RespondInternalError(w, "Failed to delete user")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		utils.RespondInternalError(w, "Failed to commit deletion")
+		return
+	}
+
+	utils.RespondSuccess(w, "Intern and credentials deleted", nil)
 }
 
 // Helpers
@@ -505,4 +545,63 @@ func nullIfEmptySQL(val sql.NullString) interface{} {
 		return val.String
 	}
 	return nil
+}
+
+// --- Presentation helpers to avoid sql.Null* leaking as objects ---
+func presentInterns(list []models.InternWithDetails) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(list))
+	for _, it := range list {
+		out = append(out, presentIntern(it))
+	}
+	return out
+}
+
+func presentIntern(it models.InternWithDetails) map[string]interface{} {
+	return map[string]interface{}{
+		"id":                    it.ID,
+		"user_id":               it.UserID,
+		"institution_id":        nullInt64ToPtr(it.InstitutionID),
+		"supervisor_id":         nullInt64ToPtr(it.SupervisorID),
+		"full_name":             it.FullName,
+		"nis":                   nullStringToPtr(it.NIS),
+		"student_id":            nullStringToPtr(it.StudentID),
+		"school":                nullStringToPtr(it.School),
+		"department":            nullStringToPtr(it.Department),
+		"date_of_birth":         nullTimeToPtr(it.DateOfBirth),
+		"gender":                it.Gender,
+		"phone":                 nullStringToPtr(it.Phone),
+		"address":               nullStringToPtr(it.Address),
+		"start_date":            it.StartDate,
+		"end_date":              it.EndDate,
+		"status":                it.Status,
+		"certificate_number":    nullStringToPtr(it.CertificateNumber),
+		"certificate_issued_at": nullTimeToPtr(it.CertificateIssuedAt),
+		"created_at":            it.CreatedAt,
+		"updated_at":            it.UpdatedAt,
+		"email":                 it.Email,
+		"supervisor_name":       it.SupervisorName,
+		"institution_name":      it.InstitutionName,
+	}
+}
+
+func nullStringToPtr(ns sql.NullString) *string {
+	if !ns.Valid {
+		return nil
+	}
+	s := ns.String
+	return &s
+}
+func nullInt64ToPtr(n sql.NullInt64) *int64 {
+	if !n.Valid {
+		return nil
+	}
+	v := n.Int64
+	return &v
+}
+func nullTimeToPtr(t sql.NullTime) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	v := t.Time
+	return &v
 }

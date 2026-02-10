@@ -9327,9 +9327,9 @@ var taskDescriptions = []string{
 }
 
 var supervisorSeeds = []supervisorSeed{
-	{Name: "Bambang Agus Herlambang, M.Kom", Email: "bambang.herlambang@internapro.id", NIP: "198501234567891001"},
-	{Name: "Noora Qotrun Nada, S.T., M.T.", Email: "noora@internapro.id", NIP: "198601234567891002"},
-	{Name: "Mega Novita, Ph.D", Email: "mega.novita@internapro.id", NIP: "198701234567891003"},
+	{Name: "Bambang Agus Herlambang, M.Kom", Email: "bambang.herlambang@dsi_interna_sys.id", NIP: "198501234567891001"},
+	{Name: "Noora Qotrun Nada, S.T., M.T.", Email: "noora@dsi_interna_sys.id", NIP: "198601234567891002"},
+	{Name: "Mega Novita, Ph.D", Email: "mega.novita@dsi_interna_sys.id", NIP: "198701234567891003"},
 }
 
 func main() {
@@ -9398,7 +9398,7 @@ func openDB() *sql.DB {
 
 func seedAdmin(db *sql.DB) int64 {
 	fmt.Println("Creating admin account...")
-	adminID, err := createOrGetUser(db, "Administrator", "admin@internapro.id", "password", "admin")
+	adminID, err := createOrGetUser(db, "Administrator", "admin@dsi_interna_sys.id", "password", "admin")
 	if err != nil {
 		log.Fatal("Failed to create admin:", err)
 	}
@@ -10062,13 +10062,13 @@ func printSummary() {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("")
 	fmt.Println("👤 Admin Account:")
-	fmt.Println("   Email:    admin@internapro.id")
+	fmt.Println("   Email:    admin@dsi_interna_sys.id")
 	fmt.Println("   Password: password")
 	fmt.Println("")
 	fmt.Println("👨‍💼 Supervisor Accounts:")
-	fmt.Println("   - bambang.herlambang@internapro.id")
-	fmt.Println("   - khamizar@internapro.id")
-	fmt.Println("   - mega.novita@internapro.id")
+	fmt.Println("   - bambang.herlambang@dsi_interna_sys.id")
+	fmt.Println("   - khamizar@dsi_interna_sys.id")
+	fmt.Println("   - mega.novita@dsi_interna_sys.id")
 	fmt.Println("   Password: password")
 	fmt.Println("")
 	fmt.Println("👩‍💻 Intern Accounts:")

@@ -4,6 +4,7 @@
   import { api } from '../lib/api.js';
   import { auth } from '../lib/auth.svelte.js';
 
+
   // --- Configuration ---
   const monthNames = [
     'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -18,8 +19,13 @@
   let selectedDate = $state(new Date());
   let viewMode = $state('attendance'); // 'attendance' | 'tasks'
   let showModal = $state(false);
+  let showTaskModal = $state(false);
   let modalData = $state(null);
   let holidays = $state([]);
+  
+  // Search states
+  let attendanceSearchQuery = $state('');
+  let taskSearchQuery = $state('');
 
   // --- User Role ---
   const canManage = $derived(auth.user?.role === 'admin' || auth.user?.role === 'supervisor');
@@ -49,6 +55,18 @@
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return null;
     return d;
+  }
+
+  // FIXED: Normalize date string to YYYY-MM-DD format for consistent comparison
+  function normalizeDateString(dateStr) {
+    if (!dateStr) return null;
+    // If it's already in YYYY-MM-DD format, return as is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return dateStr;
+    }
+    // Try parsing and reformatting
+    const parsed = parseDate(dateStr);
+    return parsed ? toDateKey(parsed) : null;
   }
 
   // Generate Calendar Grid
@@ -87,7 +105,12 @@
   function buildAttendanceMap(records) {
     const map = {};
     for (const record of records) {
-      if (record.date) map[record.date] = record;
+      if (record.date) {
+        const normalizedDate = normalizeDateString(record.date);
+        if (normalizedDate) {
+          map[normalizedDate] = record;
+        }
+      }
     }
     return map;
   }
@@ -112,7 +135,10 @@
   function buildHolidaysMap(list) {
     const map = {};
     for (const holiday of list) {
-      map[holiday.date] = holiday;
+      const normalizedDate = normalizeDateString(holiday.date);
+      if (normalizedDate) {
+        map[normalizedDate] = holiday;
+      }
     }
     return map;
   }
@@ -121,11 +147,31 @@
   
   const monthHolidays = $derived(
     holidays.filter(h => {
-      const hDate = new Date(h.date);
+      const normalizedDate = normalizeDateString(h.date);
+      if (!normalizedDate) return false;
+      const hDate = new Date(normalizedDate + 'T00:00:00');
       return hDate.getMonth() === currentMonth.getMonth() && 
              hDate.getFullYear() === currentMonth.getFullYear();
     })
   );
+
+  // --- Filtered Lists ---
+  const filteredAttendances = $derived(
+    modalData?.attendances?.filter(att => 
+      att.intern_name?.toLowerCase().includes(attendanceSearchQuery.toLowerCase())
+    ) || []
+  );
+
+  const filteredTasks = $derived.by(() => {
+    const dateKey = toDateKey(selectedDate);
+    const dailyTasks = tasksByDate[dateKey] || [];
+    if (!taskSearchQuery.trim()) return dailyTasks;
+    
+    return dailyTasks.filter(task => 
+      task.title?.toLowerCase().includes(taskSearchQuery.toLowerCase()) ||
+      task.description?.toLowerCase().includes(taskSearchQuery.toLowerCase())
+    );
+  });
 
   // --- Styling Helpers (Parity with Laravel) ---
   function getPriorityColor(priority) {
@@ -141,12 +187,12 @@
   function getAttendanceColor(status) {
     // Parity with calendar.blade.php colors
     switch (status) {
-      case 'present': return { bg: 'bg-emerald-500', text: 'text-white' };
-      case 'late': return { bg: 'bg-amber-500', text: 'text-white' };
-      case 'absent': return { bg: 'bg-rose-500', text: 'text-white' };
-      case 'permission': return { bg: 'bg-sky-500', text: 'text-white' };
-      case 'sick': return { bg: 'bg-purple-500', text: 'text-white' };
-      default: return { bg: 'bg-slate-400', text: 'text-white' };
+      case 'present': return { bg: 'bg-emerald-100', text: 'text-emerald-700 border border-emerald-200' };
+      case 'late': return { bg: 'bg-amber-100', text: 'text-amber-700 border border-amber-200' };
+      case 'absent': return { bg: 'bg-rose-100', text: 'text-rose-700 border border-rose-200' };
+      case 'permission': return { bg: 'bg-sky-100', text: 'text-sky-700 border border-sky-200' };
+      case 'sick': return { bg: 'bg-purple-100', text: 'text-purple-700 border border-purple-200' };
+      default: return { bg: 'bg-slate-100', text: 'text-slate-700 border border-slate-200' };
     }
   }
 
@@ -165,7 +211,7 @@
     switch (status) {
       case 'present': return 'Hadir';
       case 'late': return 'Terlambat';
-      case 'absent': return 'Absen';
+      case 'absent': return 'Tidak Hadir';
       case 'permission': return 'Izin';
       case 'sick': return 'Sakit';
       default: return '-';
@@ -213,6 +259,10 @@
       tasks = tasksRes.data || [];
       holidays = holidaysRes.data || [];
 
+      // Debug: Log attendance data format
+      console.log('Sample attendance record:', attendance[0]);
+      console.log('Total attendance records:', attendance.length);
+
     } catch (err) {
       console.error(err);
       // Optionally, show a toast notification
@@ -249,9 +299,6 @@
   
   function selectDate(date) {
     selectedDate = date;
-    if (viewMode === 'attendance' && canManage) {
-      openAttendanceModal(date);
-    }
   }
   
   async function openAttendanceModal(date) {
@@ -277,6 +324,7 @@
         attendances: dailyAttendances,
       };
       
+      attendanceSearchQuery = ''; // Reset search
       showModal = true;
     } catch (error) {
       console.error("Failed to fetch attendance details:", error);
@@ -287,23 +335,45 @@
   function closeModal() {
     showModal = false;
     modalData = null;
+    attendanceSearchQuery = '';
   }
   
+  function closeTaskModal() {
+    showTaskModal = false;
+    taskSearchQuery = '';
+  }
+  
+  // FIXED: Now uses normalized date matching and returns events array like Laravel
   function calculateDayStats(dateKey) {
-    const dailyRecords = attendance.filter(a => a.date === dateKey);
+    // Filter records for this specific date with normalized comparison
+    const dailyRecords = attendance.filter(a => {
+      const recordDate = normalizeDateString(a.date);
+      return recordDate === dateKey;
+    });
+    
     if (dailyRecords.length === 0) {
-      return null;
+      return null; // No data for this day
+    }
+
+    // Build event objects similar to Laravel structure
+    const events = [];
+    const statuses = ['present', 'permission', 'late', 'sick'];
+    
+    for (const status of statuses) {
+      const count = dailyRecords.filter(a => a.status === status).length;
+      if (count > 0) {
+        events.push({ status, count });
+      }
     }
     
-    const stats = {
-      present: dailyRecords.filter(a => a.status === 'present').length,
-      late: dailyRecords.filter(a => a.status === 'late').length,
-      sick: dailyRecords.filter(a => a.status === 'sick').length,
-      permission: dailyRecords.filter(a => a.status === 'permission').length,
-      absent: dailyRecords.filter(a => a.status === 'absent').length,
-      total: dailyRecords.length,
-    };
-    return stats;
+    return events.length > 0 ? events : null;
+  }
+
+  function handleKeydown(e) {
+    if (e.key === 'Escape') {
+      if (showTaskModal) closeTaskModal();
+      if (showModal) closeModal();
+    }
   }
 
   onMount(fetchCalendarData);
@@ -312,6 +382,8 @@
     fetchCalendarData();
   });
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="w-full max-w-7xl mx-auto space-y-6">
   <div class="card p-0 overflow-hidden bg-white border-slate-200 shadow-sm rounded-xl">
@@ -329,7 +401,7 @@
         </button>
       </div>
 
-      <div class="flex w-full md:w-auto gap-2 h-full">
+      <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
         <button 
           onclick={() => viewMode = 'attendance'} 
           class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2 {viewMode === 'attendance' ? 'bg-slate-900 text-white border border-transparent' : 'bg-white text-slate-900 border border-slate-200 hover:border-slate-300'}"
@@ -344,6 +416,18 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           <span class="hidden sm:inline">Tugas</span>
         </button>
+              <button 
+                onclick={() => viewMode === 'attendance' ? openAttendanceModal(selectedDate) : (showTaskModal = true)}
+                class="w-full md:w-auto justify-center cursor-pointer px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm flex items-center gap-2"
+              >
+                {#if viewMode === 'attendance'}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>
+                  Tinjau Kehadiran
+                {:else}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v2a2 2 0 0 0 2 2z"/></svg>
+                  Tinjau Agenda
+                {/if}
+              </button>
       </div>
     </div>
 
@@ -371,6 +455,7 @@
             <button
               class="relative p-2 border rounded-xl transition-all flex flex-col gap-1 text-left
                      {isToday(day.date) ? 'bg-indigo-50/50 border-indigo-200 ring-1 ring-indigo-200' : (isRedDate ? 'bg-rose-50/50 border-rose-100' : 'bg-white border-slate-100')}
+                     {isSelected(day.date) ? '!ring-2 !ring-indigo-600 !border-transparent z-10' : ''}
                      {viewMode === 'attendance' && canManage ? 'cursor-pointer hover:border-indigo-300 hover:shadow-md hover:-translate-y-0.5' : 'hover:border-indigo-300 hover:shadow-sm'}"
               style={day.outside ? 'opacity: 0.5;' : ''}
               onclick={() => selectDate(day.date)}
@@ -392,37 +477,29 @@
                 
                 {#if viewMode === 'attendance'}
                   {#if canManage}
-                    <!-- Admin Summary View -->
-                    {@const dayStats = calculateDayStats(dateKey)}
-                    {#if dayStats}
-                      <div class="hidden sm:flex flex-wrap gap-1 content-start mt-1">
-                        {#if dayStats.present > 0}
-                          <div class="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-emerald-500 flex items-center justify-center text-[9px] sm:text-[10px] font-bold text-white ring-1 ring-white" title="Hadir: {dayStats.present}">
-                            {dayStats.present}
+                    <!-- FIXED: Admin Summary View - Laravel parity with proper styling -->
+                    {@const dayEvents = calculateDayStats(dateKey)}
+                    {#if dayEvents}
+                      <!-- Desktop & Mobile view with proper container -->
+                      <div class="flex flex-wrap gap-1 content-start mt-1">
+                        {#each dayEvents as event}
+                          {@const statusClasses = {
+                            'present': 'bg-emerald-500',
+                            'late': 'bg-amber-500',
+                            'absent': 'bg-rose-500',
+                            'permission': 'bg-sky-500',
+                            'sick': 'bg-purple-500',
+                          }}
+                          {@const bgClass = statusClasses[event.status] || 'bg-slate-500'}
+                          
+                          <div 
+                            class="w-5 h-5 sm:w-6 sm:h-6 rounded-full {bgClass} flex items-center justify-center text-[9px] sm:text-[10px] font-bold text-white ring-1 ring-white shadow-sm" 
+                            title="{getAttendanceLabel(event.status)}: {event.count}"
+                          >
+                            {event.count}
                           </div>
-                        {/if}
-                        {#if dayStats.late > 0}
-                          <div class="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-amber-500 flex items-center justify-center text-[9px] sm:text-[10px] font-bold text-white ring-1 ring-white" title="Terlambat: {dayStats.late}">
-                            {dayStats.late}
-                          </div>
-                        {/if}
-                        {#if dayStats.absent > 0}
-                          <div class="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-rose-500 flex items-center justify-center text-[9px] sm:text-[10px] font-bold text-white ring-1 ring-white" title="Absen: {dayStats.absent}">
-                            {dayStats.absent}
-                          </div>
-                        {/if}
-                        {#if dayStats.permission > 0}
-                          <div class="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-sky-500 flex items-center justify-center text-[9px] sm:text-[10px] font-bold text-white ring-1 ring-white" title="Izin: {dayStats.permission}">
-                            {dayStats.permission}
-                          </div>
-                        {/if}
-                        {#if dayStats.sick > 0}
-                          <div class="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-purple-500 flex items-center justify-center text-[9px] sm:text-[10px] font-bold text-white ring-1 ring-white" title="Sakit: {dayStats.sick}">
-                            {dayStats.sick}
-                          </div>
-                        {/if}
+                        {/each}
                       </div>
-                      <div class="sm:hidden w-2 h-2 rounded-full bg-emerald-500 mx-auto"></div>
                     {/if}
                   {:else}
                     <!-- Personal Attendance View -->
@@ -472,23 +549,23 @@
           {#if viewMode === 'attendance'}
             <!-- Attendance Legends -->
             <div class="flex items-center gap-2">
-              <span class="w-3 h-3 rounded bg-emerald-500"></span>
+              <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
               <span class="text-slate-600">Hadir</span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="w-3 h-3 rounded bg-amber-500"></span>
+              <span class="w-3 h-3 rounded-full bg-amber-500"></span>
               <span class="text-slate-600">Terlambat</span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="w-3 h-3 rounded bg-rose-500"></span>
-              <span class="text-slate-600">Absen</span>
+              <span class="w-3 h-3 rounded-full bg-rose-500"></span>
+              <span class="text-slate-600">Tidak Hadir</span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="w-3 h-3 rounded bg-sky-500"></span>
+              <span class="w-3 h-3 rounded-full bg-sky-500"></span>
               <span class="text-slate-600">Izin</span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="w-3 h-3 rounded bg-purple-500"></span>
+              <span class="w-3 h-3 rounded-full bg-purple-500"></span>
               <span class="text-slate-600">Sakit</span>
             </div>
             {#if canManage}
@@ -513,6 +590,8 @@
               <span class="w-3 h-3 rounded bg-emerald-500"></span>
               <span class="text-slate-600">Prioritas Rendah</span>
             </div>
+            
+
           {/if}
         </div>
       </div>
@@ -534,12 +613,15 @@
         </h4>
         <div class="space-y-2">
           {#each monthHolidays as holiday}
-            <div class="flex items-center gap-2 p-2 bg-white/60 rounded-lg border border-rose-100">
-              <span class="w-8 h-8 bg-rose-100 text-rose-600 rounded-lg flex items-center justify-center font-bold text-sm">
-                {new Date(holiday.date + 'T00:00:00').getDate()}
-              </span>
-              <span class="text-sm text-slate-700 font-medium">{holiday.name}</span>
-            </div>
+            {@const normalizedDate = normalizeDateString(holiday.date)}
+            {#if normalizedDate}
+              <div class="flex items-center gap-2 p-2 bg-white/60 rounded-lg border border-rose-100">
+                <span class="w-8 h-8 bg-rose-100 text-rose-600 rounded-lg flex items-center justify-center font-bold text-sm">
+                  {new Date(normalizedDate + 'T00:00:00').getDate()}
+                </span>
+                <span class="text-sm text-slate-700 font-medium">{holiday.name}</span>
+              </div>
+            {/if}
           {/each}
         </div>
       </div>
@@ -560,14 +642,14 @@
           <!-- Modal Header -->
           <div class="p-5 border-b border-slate-100 flex justify-between items-start bg-slate-50/50">
             <div>
-              <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+              <h3 class="text-lg cursor-pointer font-bold text-slate-800 flex items-center gap-2">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
                   <line x1="16" y1="2" x2="16" y2="6"/>
                   <line x1="8" y1="2" x2="8" y2="6"/>
                   <line x1="3" y1="10" x2="21" y2="10"/>
                 </svg>
-                Statistik Kehadiran
+                Riwayat Kehadiran
               </h3>
               <p class="text-slate-500 text-sm mt-1">{modalData?.date || ''}</p>
             </div>
@@ -608,8 +690,26 @@
               </div>
             </div>
 
-            <!-- Attendance List -->
+            <!-- Search Bar (hidden if no data) -->
             {#if modalData?.attendances && modalData.attendances.length > 0}
+              {#if modalData.attendances.length > 1}
+              <div class="mb-4">
+                <div class="relative">
+                  <input 
+                    type="text" 
+                    bind:value={attendanceSearchQuery}
+                    placeholder="Cari nama siswa..."
+                    class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition-all text-sm"
+                  />
+                  <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <path d="m21 21-4.35-4.35"/>
+                  </svg>
+                </div>
+              </div>
+              {/if}
+
+              <!-- Attendance List -->
               <div>
                 <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3 flex items-center gap-2">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -619,38 +719,48 @@
                     <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                   </svg>
                   Detail Kehadiran
+                  {#if attendanceSearchQuery}
+                    <span class="text-xs font-normal text-slate-400">({filteredAttendances.length} hasil)</span>
+                  {/if}
                 </h4>
-                <div class="border border-slate-200 rounded-xl overflow-hidden">
-                  <table class="w-full text-left text-sm">
-                    <thead class="bg-slate-50 text-slate-500 font-semibold uppercase text-xs">
-                      <tr>
-                        <th class="px-4 py-3">Nama Siswa</th>
-                        <th class="px-4 py-3">Status</th>
-                        <th class="px-4 py-3 text-center">Masuk</th>
-                        <th class="px-4 py-3 text-center">Keluar</th>
-                      </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100">
-                      {#each modalData.attendances as att}
-                        {@const attColor = getAttendanceColor(att.status)}
-                        <tr class="hover:bg-slate-50/50">
-                          <td class="px-4 py-3 font-medium text-slate-700">{att.intern_name}</td>
-                          <td class="px-4 py-3">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold {attColor.bg} {attColor.text}">
-                              {getAttendanceLabel(att.status)}
-                            </span>
-                          </td>
-                          <td class="px-4 py-3 text-center font-mono text-xs text-slate-500">
-                            {att.check_in_time ? new Date(att.check_in_time).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit'}) : '-'}
-                          </td>
-                          <td class="px-4 py-3 text-center font-mono text-xs text-slate-500">
-                            {att.check_out_time ? new Date(att.check_out_time).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit'}) : '-'}
-                          </td>
+                
+                {#if filteredAttendances.length > 0}
+                  <div class="border border-slate-200 rounded-xl overflow-hidden">
+                    <table class="w-full text-left text-sm">
+                      <thead class="bg-slate-50 text-slate-500 font-semibold uppercase text-xs">
+                        <tr>
+                          <th class="px-4 py-3">Nama Siswa</th>
+                          <th class="px-4 py-3">Status</th>
+                          <th class="px-4 py-3 text-center">Masuk</th>
+                          <th class="px-4 py-3 text-center">Keluar</th>
                         </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody class="divide-y divide-slate-100">
+                        {#each filteredAttendances as att}
+                          {@const attColor = getAttendanceColor(att.status)}
+                          <tr class="hover:bg-slate-50/50">
+                            <td class="px-4 py-3 font-medium text-slate-700">{att.intern_name}</td>
+                            <td class="px-4 py-3">
+                              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold {attColor.bg} {attColor.text}">
+                                {getAttendanceLabel(att.status)}
+                              </span>
+                            </td>
+                            <td class="px-4 py-3 text-center font-mono text-xs text-slate-500">
+                              {att.check_in_time ? new Date(att.check_in_time).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit'}) : '-'}
+                            </td>
+                            <td class="px-4 py-3 text-center font-mono text-xs text-slate-500">
+                              {att.check_out_time ? new Date(att.check_out_time).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit'}) : '-'}
+                            </td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                {:else}
+                  <div class="text-center py-8 text-slate-400 bg-slate-50 rounded-xl">
+                    <p>Tidak ditemukan siswa dengan nama "{attendanceSearchQuery}"</p>
+                  </div>
+                {/if}
               </div>
             {:else}
               <div class="text-center py-8 text-slate-400">
@@ -673,5 +783,106 @@
       </div>
     {/if}
   {/if}
+
+    <!-- Task Modal -->
+    {#if showTaskModal}
+      {@const dateKey = toDateKey(selectedDate)}
+      {@const dailyTasks = tasksByDate[dateKey] || []}
+      {@const holiday = getHoliday(selectedDate)}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" onclick={closeTaskModal}>
+        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity"></div>
+
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onclick={(e) => e.stopPropagation()}>
+          <!-- Header -->
+          <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              Agenda
+            </h3>
+            <button onclick={closeTaskModal} class="cursor-pointer w-8 h-8 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-rose-50 hover:text-rose-500 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          
+          <!-- Body -->
+          <div class="p-6 overflow-y-auto">
+             <div class="mb-4">
+                <h4 class="text-sm font-bold text-slate-500 uppercase tracking-wider">
+                  {selectedDate.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                </h4>
+             </div>
+
+             {#if holiday}
+               <div class="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-3">
+                 <span class="w-8 h-8 bg-rose-100 text-rose-600 rounded-lg flex items-center justify-center font-bold text-sm">
+                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                 </span>
+                 <div>
+                   <h5 class="font-bold text-rose-700 text-sm">Hari Libur</h5>
+                   <p class="text-xs text-rose-600 font-medium">{holiday.name}</p>
+                 </div>
+               </div>
+             {/if}
+
+             <!-- Search Bar (hidden if no tasks) -->
+             {#if dailyTasks.length > 0}
+               {#if dailyTasks.length > 1}
+               <div class="mb-4">
+                 <div class="relative">
+                   <input 
+                     type="text" 
+                     bind:value={taskSearchQuery}
+                     placeholder="Cari judul atau deskripsi tugas..."
+                     class="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition-all text-sm"
+                   />
+                   <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                     <circle cx="11" cy="11" r="8"/>
+                     <path d="m21 21-4.35-4.35"/>
+                   </svg>
+                 </div>
+               </div>
+               {/if}
+
+               {#if filteredTasks.length > 0}
+                 <div class="space-y-3">
+                   {#each filteredTasks as task}
+                     <button 
+                       onclick={() => goto(`/tasks/${task.id}`)}
+                       class="cursor-pointer w-full text-left p-4 rounded-xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all bg-white group"
+                     >
+                       <div class="flex justify-between items-start mb-2">
+                         <h5 class="font-bold text-slate-800 group-hover:text-indigo-600 transition-colors line-clamp-1">{task.title}</h5>
+                         <span class="px-2 py-0.5 rounded text-[10px] font-bold border uppercase {getPriorityColor(task.priority)}">
+                           {task.priority}
+                         </span>
+                       </div>
+                       <p class="text-xs text-slate-500 line-clamp-2 mb-3">{task.description || 'Tidak ada deskripsi'}</p>
+                       <div class="flex items-center gap-3 text-xs text-slate-400">
+                          <span class="flex items-center gap-1">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            {task.deadline ? new Date(task.deadline).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'}) : 'All Day'}
+                          </span>
+                       </div>
+                     </button>
+                   {/each}
+                 </div>
+               {:else}
+                 <div class="text-center py-12 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                   <p>Tidak ditemukan agenda dengan kata kunci "{taskSearchQuery}"</p>
+                 </div>
+               {/if}
+             {:else}
+               <div class="text-center py-12 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mx-auto mb-2 opacity-50"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                 <p>Tidak ada agenda untuk tanggal ini</p>
+               </div>
+             {/if}
+          </div>
+        </div>
+      </div>
+    {/if}
 </div>
-<!-- </div> -->

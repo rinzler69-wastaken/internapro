@@ -3,6 +3,8 @@ package routes
 import (
 	"database/sql"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"dsi_interna_sys/internal/handlers"
 	"dsi_interna_sys/internal/middleware"
@@ -37,6 +39,11 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	api.HandleFunc("/auth/password/forgot", passwordResetHandler.RequestReset).Methods("POST")
 	api.HandleFunc("/auth/password/reset", passwordResetHandler.Reset).Methods("POST")
 
+	// --- NEW: Route Pendaftaran Magang (Public) ---
+	// Endpoint ini bisa diakses tanpa login untuk pendaftaran mandiri
+	api.HandleFunc("/internship/register", internHandler.Register).Methods("POST")
+	api.HandleFunc("/supervisors", supervisorHandler.GetAllPublic).Methods("GET")
+
 	// Protected
 	protected := api.PathPrefix("").Subrouter()
 	protected.Use(middleware.AuthMiddleware)
@@ -47,6 +54,14 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	admin := protected.PathPrefix("").Subrouter()
 	admin.Use(middleware.RequireRole("admin"))
 	admin.HandleFunc("/auth/register", authHandler.Register).Methods("POST")
+	// Admin supervisor aliases (avoid clash with public supervisors)
+	admin.HandleFunc("/admin/supervisors", supervisorHandler.GetAll).Methods("GET")
+	admin.HandleFunc("/admin/supervisors", supervisorHandler.Create).Methods("POST")
+	admin.HandleFunc("/admin/supervisors/{id}", supervisorHandler.GetByID).Methods("GET")
+	admin.HandleFunc("/admin/supervisors/{id}", supervisorHandler.Update).Methods("PUT")
+	admin.HandleFunc("/admin/supervisors/{id}", supervisorHandler.Delete).Methods("DELETE")
+	admin.HandleFunc("/admin/supervisors/{id}/approve", supervisorHandler.Approve).Methods("POST")
+	admin.HandleFunc("/admin/supervisors/{id}/reject", supervisorHandler.Reject).Methods("POST")
 
 	// Auth
 	protected.HandleFunc("/auth/me", authHandler.GetCurrentUser).Methods("GET")
@@ -176,10 +191,48 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 			),
 		),
 	)
+
+	// SPA fallback: serve built frontend from /frontend/dist (override with FRONTEND_DIST_DIR)
+	router.PathPrefix("/").Handler(newSPAHandler(getFrontendDistDir()))
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"ok","message":"INTERNA API is running"}`))
+}
+
+// newSPAHandler serves static frontend assets and falls back to index.html for client-side routes.
+func newSPAHandler(staticDir string) http.Handler {
+	absDir := staticDir
+	if !filepath.IsAbs(staticDir) {
+		wd, err := os.Getwd()
+		if err == nil {
+			absDir = filepath.Clean(filepath.Join(wd, staticDir))
+		}
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Avoid path traversal
+		requestPath := filepath.Clean(r.URL.Path)
+		targetPath := filepath.Join(absDir, requestPath)
+
+		// If the requested file exists and is not a directory, serve it
+		if info, err := os.Stat(targetPath); err == nil && !info.IsDir() {
+			http.ServeFile(w, r, targetPath)
+			return
+		}
+
+		// Otherwise, serve index.html for SPA routing
+		http.ServeFile(w, r, filepath.Join(absDir, "index.html"))
+	})
+}
+
+// getFrontendDistDir returns the path to the built frontend directory.
+// Defaults to ../frontend/dist relative to the backend folder, but can be overridden via FRONTEND_DIST_DIR.
+func getFrontendDistDir() string {
+	if custom := os.Getenv("FRONTEND_DIST_DIR"); custom != "" {
+		return custom
+	}
+	return filepath.Clean("../frontend/dist")
 }

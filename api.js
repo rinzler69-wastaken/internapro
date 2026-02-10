@@ -50,7 +50,6 @@ class ApiClient {
 
       if (!response.ok) {
         if (response.status === 401) {
-          // Don't redirect here, just throw error
           this.setToken(null);
         }
         throw new Error(data.error || data.message || 'Request failed');
@@ -63,7 +62,9 @@ class ApiClient {
     }
   }
 
+  // ==========================================
   // Auth endpoints
+  // ==========================================
   async login(email, password, totpCode = null) {
     const data = await this.request('/auth/login', {
       method: 'POST',
@@ -96,7 +97,59 @@ class ApiClient {
     }
   }
 
+  // ==========================================
+  // ADMIN & INTERN MANAGEMENT
+  // ==========================================
+  
+  async getAdminDashboard() {
+    return this.request('/admin/dashboard');
+  }
+
+  async getInterns(params = {}) {
+    // Convert params object to query string
+    const queryString = new URLSearchParams(params).toString();
+    // Gunakan endpoint admin jika ada, atau fallback ke /interns
+    const endpoint = `/admin/interns${queryString ? '?' + queryString : ''}`;
+    return this.request(endpoint);
+  }
+
+  async createIntern(data) {
+    return this.request('/admin/interns', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async updateIntern(id, data) {
+    return this.request(`/admin/interns/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async deleteIntern(id) {
+    return this.request(`/admin/interns/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async getSupervisors(params = {}) {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = `/supervisors${queryString ? '?' + queryString : ''}`;
+    return this.request(endpoint);
+  }
+
+  // FUNGSI PENTING UNTUK TOMBOL APPROVE
+  async updateInternStatus(id, status) {
+    return this.request(`/admin/interns/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
+    });
+  }
+
+  // ==========================================
   // Attendance endpoints
+  // ==========================================
   async checkIn(latitude, longitude, reason = null) {
     const body = { latitude, longitude };
     if (reason) {
@@ -123,7 +176,9 @@ class ApiClient {
     return this.request(`/attendance/intern/${internId}?page=${page}&limit=${limit}`);
   }
 
+  // ==========================================
   // Analytics endpoints
+  // ==========================================
   async getWeeklyTrends(internId, weekOffset = 0) {
     return this.request(`/analytics/trends/weekly/${internId}?week_offset=${weekOffset}`);
   }
@@ -136,11 +191,25 @@ class ApiClient {
     return this.request(`/analytics/insights/${internId}`);
   }
 
+  // ==========================================
   // Task endpoints
-  async getTasks(internId = null, page = 1) {
-    const endpoint = internId 
-      ? `/tasks/intern/${internId}?page=${page}` 
-      : `/tasks?page=${page}`;
+  // ==========================================
+  // Updated to support object params {status: 'submitted'}
+  async getTasks(arg1 = {}, arg2 = 1) {
+    let endpoint = '/tasks';
+    
+    // Cek apakah arg1 adalah params object atau internId string/null
+    if (arg1 && typeof arg1 === 'object') {
+        const queryString = new URLSearchParams(arg1).toString();
+        endpoint = `/tasks${queryString ? '?' + queryString : ''}`;
+    } else {
+        // Logic Lama (internId, page)
+        const internId = arg1;
+        const page = arg2;
+        endpoint = internId 
+          ? `/tasks/intern/${internId}?page=${page}` 
+          : `/tasks?page=${page}`;
+    }
     return this.request(endpoint);
   }
 
@@ -168,7 +237,9 @@ class ApiClient {
     }).then(res => res.json());
   }
 
+  // ==========================================
   // Leave endpoints
+  // ==========================================
   async getLeaveRequests(internId = null) {
     const endpoint = internId 
       ? `/leaves/intern/${internId}` 
@@ -197,7 +268,9 @@ class ApiClient {
     });
   }
 
+  // ==========================================
   // Assessment endpoints
+  // ==========================================
   async getAssessments(internId = null) {
     const endpoint = internId 
       ? `/assessments/intern/${internId}` 
@@ -209,6 +282,15 @@ class ApiClient {
     return this.request('/assessments', {
       method: 'POST',
       body: JSON.stringify(assessmentData),
+    });
+  }
+
+  // ==========================================
+  // Generic DELETE method
+  // ==========================================
+  async delete(endpoint) {
+    return this.request(endpoint, {
+      method: 'DELETE'
     });
   }
 }

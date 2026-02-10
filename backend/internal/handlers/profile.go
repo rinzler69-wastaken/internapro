@@ -33,7 +33,11 @@ func (h *ProfileHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"SELECT id, email, role, name, avatar, is_2fa_enabled, created_at FROM users WHERE id = ?",
 		claims.UserID,
 	).Scan(&user.ID, &user.Email, &user.Role, &user.Name, &user.Avatar, &user.Is2FAEnabled, &user.CreatedAt); err != nil {
-		utils.RespondInternalError(w, "User not found")
+		if err == sql.ErrNoRows {
+			utils.RespondUnauthorized(w, "User not found or session expired")
+			return
+		}
+		utils.RespondInternalError(w, "Database error")
 		return
 	}
 

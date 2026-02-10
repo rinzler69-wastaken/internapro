@@ -35,19 +35,19 @@ type createTaskRequest struct {
 }
 
 type updateTaskRequest struct {
-	Title        *string `json:"title"`
-	Description *string `json:"description"`
-	InternID     *int64  `json:"intern_id"`
-	Priority     *string `json:"priority"`
-	Status       *string `json:"status"`
-	StartDate    *string `json:"start_date"`
-	Deadline     *string `json:"deadline"`
-	DeadlineTime *string `json:"deadline_time"`
+	Title         *string `json:"title"`
+	Description   *string `json:"description"`
+	InternID      *int64  `json:"intern_id"`
+	Priority      *string `json:"priority"`
+	Status        *string `json:"status"`
+	StartDate     *string `json:"start_date"`
+	Deadline      *string `json:"deadline"`
+	DeadlineTime  *string `json:"deadline_time"`
 	AdminFeedback *string `json:"admin_feedback"`
 }
 
 type submitTaskRequest struct {
-	SubmissionNotes string                `json:"submission_notes"`
+	SubmissionNotes string                  `json:"submission_notes"`
 	Links           []models.SubmissionLink `json:"links"`
 }
 
@@ -86,8 +86,10 @@ func (h *TaskHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	var where []string
 	var args []interface{}
 
+	role := normalizeRole(claims.Role)
+
 	// Interns can only see their tasks and not scheduled tasks
-	if normalizeRole(claims.Role) == "intern" {
+	if role == "intern" {
 		internID, err := h.getInternIDForUser(claims.UserID)
 		if err != nil {
 			utils.RespondNotFound(w, "Intern not found")
@@ -96,10 +98,17 @@ func (h *TaskHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "t.intern_id = ?")
 		args = append(args, internID)
 		where = append(where, "t.status != 'scheduled'")
-	} else if internFilter != "" {
-		if id, err := strconv.ParseInt(internFilter, 10, 64); err == nil {
-			where = append(where, "t.intern_id = ?")
-			args = append(args, id)
+	} else {
+		// Supervisors/pembimbing only see tasks for their own interns
+		if role == "pembimbing" {
+			where = append(where, "i.supervisor_id = ?")
+			args = append(args, claims.UserID)
+		}
+		if internFilter != "" {
+			if id, err := strconv.ParseInt(internFilter, 10, 64); err == nil {
+				where = append(where, "t.intern_id = ?")
+				args = append(args, id)
+			}
 		}
 	}
 
@@ -406,9 +415,9 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Load current task for status transitions
 	var current struct {
-		Status     string
-		StartedAt  sql.NullTime
-		Deadline   sql.NullTime
+		Status       string
+		StartedAt    sql.NullTime
+		Deadline     sql.NullTime
 		DeadlineTime sql.NullString
 	}
 	err := h.db.QueryRow("SELECT status, started_at, deadline, deadline_time FROM tasks WHERE id = ?", taskID).
@@ -716,9 +725,9 @@ func (h *TaskHandler) Review(w http.ResponseWriter, r *http.Request) {
 			map[string]interface{}{"task_id": taskID, "score": *req.Score})
 	} else {
 		_, err = h.db.Exec(
-			`UPDATE tasks SET status = 'revision', admin_feedback = ?
+			`UPDATE tasks SET status = 'revision', admin_feedback = ?, score = NULL, approved_at = ?
 			 WHERE id = ?`,
-			nullIfEmpty(req.Feedback), taskID,
+			nullIfEmpty(req.Feedback), time.Now(), taskID,
 		)
 		if err != nil {
 			utils.RespondInternalError(w, "Failed to request revision")

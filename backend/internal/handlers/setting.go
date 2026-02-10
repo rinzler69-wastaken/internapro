@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"dsi_interna_sys/internal/middleware"
@@ -19,6 +20,22 @@ func NewSettingHandler(db *sql.DB) *SettingHandler {
 	return &SettingHandler{db: db}
 }
 
+// ensureSettingsTable creates the settings table if it does not exist.
+func ensureSettingsTable(db *sql.DB) error {
+	_, err := db.Exec(
+		"CREATE TABLE IF NOT EXISTS settings (" +
+			"id BIGINT AUTO_INCREMENT PRIMARY KEY," +
+			"`key` VARCHAR(255) UNIQUE NOT NULL," +
+			"`value` TEXT," +
+			"`type` VARCHAR(50) DEFAULT 'string'," +
+			"description VARCHAR(255)," +
+			"created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+			"updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" +
+		") ENGINE=InnoDB;",
+	)
+	return err
+}
+
 func (h *SettingHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	claims, ok := middleware.GetUserFromContext(r.Context())
 	if !ok {
@@ -30,9 +47,17 @@ func (h *SettingHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.db.Query("SELECT id, `key`, `value`, `type`, description, created_at, updated_at FROM settings")
+	if err := ensureSettingsTable(h.db); err != nil {
+		log.Printf("settings ensure table failed: %v", err)
+		utils.RespondInternalError(w, "Failed to prepare settings table: "+err.Error())
+		return
+	}
+
+	// Select only core columns to tolerate older settings table schemas.
+	rows, err := h.db.Query("SELECT id, `key`, `value` FROM settings")
 	if err != nil {
-		utils.RespondInternalError(w, "Failed to fetch settings")
+		log.Printf("settings query failed: %v", err)
+		utils.RespondInternalError(w, "Failed to fetch settings: "+err.Error())
 		return
 	}
 	defer rows.Close()
@@ -40,7 +65,8 @@ func (h *SettingHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	var settings []models.Setting
 	for rows.Next() {
 		var s models.Setting
-		if err := rows.Scan(&s.ID, &s.Key, &s.Value, &s.Type, &s.Description, &s.CreatedAt, &s.UpdatedAt); err == nil {
+		if err := rows.Scan(&s.ID, &s.Key, &s.Value); err == nil {
+			// Type/Description/CreatedAt/UpdatedAt may not exist in older schemas.
 			settings = append(settings, s)
 		}
 	}
@@ -56,6 +82,12 @@ func (h *SettingHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if middleware.NormalizeRole(claims.Role) == "intern" {
 		utils.RespondForbidden(w, "Only admin or pembimbing can update settings")
+		return
+	}
+
+	if err := ensureSettingsTable(h.db); err != nil {
+		log.Printf("settings ensure table failed: %v", err)
+		utils.RespondInternalError(w, "Settings table unavailable: "+err.Error())
 		return
 	}
 
@@ -76,12 +108,14 @@ func (h *SettingHandler) Update(w http.ResponseWriter, r *http.Request) {
 		val := fmt.Sprint(value)
 		query := "INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)"
 		if _, err := tx.Exec(query, key, val); err != nil {
+			log.Printf("settings update failed for key %s: %v", key, err)
 			utils.RespondInternalError(w, "Failed to update settings")
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
+		log.Printf("settings commit failed: %v", err)
 		utils.RespondInternalError(w, "Failed to commit settings")
 		return
 	}

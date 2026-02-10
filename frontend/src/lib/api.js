@@ -2,6 +2,8 @@ import { auth } from './auth.svelte.js';
 
 const API_BASE = '/api';
 
+// --- HELPER FUNCTIONS ---
+
 async function request(endpoint, options = {}) {
   const isFormData = options.body instanceof FormData;
 
@@ -15,11 +17,6 @@ async function request(endpoint, options = {}) {
 
   const res = await fetch(`${API_BASE}${endpoint}`, config);
 
-  if (res.status === 401) {
-    auth.logout();
-    return { success: false, error: 'Unauthorized' };
-  }
-
   if (res.status === 204) return { success: true };
 
   const contentType = res.headers.get('content-type') || '';
@@ -29,6 +26,14 @@ async function request(endpoint, options = {}) {
   } else {
     const text = await res.text();
     data = text ? { message: text } : null;
+  }
+
+  // For login endpoint, let caller handle 401 so we can show proper message
+  if (res.status === 401) {
+    if (!endpoint.startsWith('/auth/login')) {
+      auth.logout();
+    }
+    throw new Error(data?.error || data?.message || 'Unauthorized');
   }
 
   if (!res.ok) throw new Error(data?.error || data?.message || `Request failed (${res.status})`);
@@ -43,14 +48,56 @@ async function download(endpoint, params = {}) {
   if (!res.ok) throw new Error('Download failed');
   const blob = await res.blob();
   const disposition = res.headers.get('Content-Disposition') || '';
-  const match = disposition.match(/filename=\"?([^\";]+)\"?/);
+  const match = disposition.match(/filename="?([^";]+)"?/);
   const filename = match?.[1] || 'download.xlsx';
   return { blob, filename };
 }
 
+// --- API OBJECT EXPORT ---
+
 export const api = {
-  // Auth
+  // ==========================================
+  // GENERIC HELPERS (Supaya api.post jalan)
+  // ==========================================
+  async get(endpoint, params = {}) {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) searchParams.append(key, String(value));
+    });
+    const query = searchParams.toString();
+    return request(`${endpoint}${query ? `?${query}` : ''}`);
+  },
+
+  async post(endpoint, body) {
+    return request(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  async put(endpoint, body) {
+    return request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+
+  async delete(endpoint) {
+    return request(endpoint, { method: 'DELETE' });
+  },
+
+  async patch(endpoint, body) {
+    return request(endpoint, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  },
+
+  // ==========================================
+  // AUTH
+  // ==========================================
   async login(email, password, totpCode = null) {
+    // Go backend biasanya expect snake_case "totp_code"
     const data = await request('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password, totp_code: totpCode }),
@@ -90,23 +137,31 @@ export const api = {
     }
   },
 
-  // Profile
-  async getProfile() {
-    return request('/profile');
+  // ==========================================
+  // ADMIN & INTERN MANAGEMENT
+  // ==========================================
+  
+  // Dashboard Statistic
+  async getAdminDashboard() {
+    return request('/dashboard/admin'); 
   },
-  async updateProfile(formData) {
-    return request('/profile', {
-      method: 'PUT',
-      body: formData,
+  
+  async updateInternStatus(id, status) {
+    return request(`/interns/${id}`, { 
+        method: 'PUT', 
+        body: JSON.stringify({ status }) 
     });
   },
-  async updatePassword(payload) {
-    return request('/profile/password', { method: 'PUT', body: JSON.stringify(payload) });
-  },
 
-  // Interns
+  // ==========================================
+  // INTERNS (CRUD sesuai intern.go)
+  // ==========================================
   async getInterns(params = {}) {
-    const query = new URLSearchParams(params).toString();
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) searchParams.append(key, String(value));
+    });
+    const query = searchParams.toString();
     return request(`/interns${query ? `?${query}` : ''}`);
   },
   async getIntern(id) {
@@ -122,32 +177,73 @@ export const api = {
     return request(`/interns/${id}`, { method: 'DELETE' });
   },
 
-  // Supervisors
-  async getSupervisors(params = {}) {
-    const query = new URLSearchParams(params).toString();
-    return request(`/supervisors${query ? `?${query}` : ''}`);
+  // ==========================================
+  // PROFILE
+  // ==========================================
+  async getProfile() {
+    return request('/profile');
   },
-  async createSupervisor(payload) {
-    return request('/supervisors', { method: 'POST', body: JSON.stringify(payload) });
+  async updateProfile(formData) {
+    return request('/profile', {
+      method: 'PUT',
+      body: formData, // FormData handle content-type automatically in helper
+    });
   },
-  async updateSupervisor(id, payload) {
-    return request(`/supervisors/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-  },
-  async deleteSupervisor(id) {
-    return request(`/supervisors/${id}`, { method: 'DELETE' });
-  },
-  async approveSupervisor(id) {
-    return request(`/supervisors/${id}/approve`, { method: 'POST' });
-  },
-  async rejectSupervisor(id) {
-    return request(`/supervisors/${id}/reject`, { method: 'POST' });
+  async updatePassword(payload) {
+    return request('/profile/password', { method: 'PUT', body: JSON.stringify(payload) });
   },
 
-  // Tasks
-  async getTasks(params = {}) {
+  // ==========================================
+  // SUPERVISORS
+  // ==========================================
+  async getSupervisors(params = {}) {
     const query = new URLSearchParams(params).toString();
+    return request(`/admin/supervisors${query ? `?${query}` : ''}`);
+  },
+  async createSupervisor(payload) {
+    return request('/admin/supervisors', { method: 'POST', body: JSON.stringify(payload) });
+  },
+  async updateSupervisor(id, payload) {
+    return request(`/admin/supervisors/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  },
+  async deleteSupervisor(id) {
+    return request(`/admin/supervisors/${id}`, { method: 'DELETE' });
+  },
+  async approveSupervisor(id) {
+    return request(`/admin/supervisors/${id}/approve`, { method: 'POST' });
+  },
+  async rejectSupervisor(id) {
+    return request(`/admin/supervisors/${id}/reject`, { method: 'POST' });
+  },
+
+  // ==========================================
+  // TASKS
+  // ==========================================
+  async getTasks(arg1, arg2) {
+    let params = {};
+    if (arg1 && typeof arg1 === 'object') {
+        params = { ...arg1 };
+    } else {
+        if (arg1) params.intern_id = arg1; 
+        params.page = arg2 || 1;
+    }
+    
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+            searchParams.append(key, String(value));
+        }
+    });
+    
+    const query = searchParams.toString();
+
+    if (params.intern_id) {
+        return request(`/tasks/intern/${params.intern_id}?page=${params.page || 1}`);
+    }
+    
     return request(`/tasks${query ? `?${query}` : ''}`);
   },
+
   async getTask(id) {
     return request(`/tasks/${id}`);
   },
@@ -172,6 +268,7 @@ export const api = {
   async uploadTaskAttachment(id, file) {
     const formData = new FormData();
     formData.append('file', file);
+    // Use manual fetch for attachment to avoid request helper override content-type
     const res = await fetch(`${API_BASE}/tasks/${id}/attachments`, {
       method: 'POST',
       headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
@@ -190,7 +287,9 @@ export const api = {
     return request(`/task-assignments/${id}`);
   },
 
-  // Attendance
+  // ==========================================
+  // ATTENDANCE
+  // ==========================================
   async checkIn(latitude, longitude, reason = null) {
     const body = { latitude, longitude };
     if (reason) body.reason = reason;
@@ -204,6 +303,7 @@ export const api = {
     Object.entries(payload).forEach(([key, value]) => {
       if (value !== null && value !== undefined) formData.append(key, value);
     });
+    // Use manual fetch for formdata
     const res = await fetch(`${API_BASE}/attendance/permission`, {
       method: 'POST',
       headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
@@ -218,12 +318,17 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return request(`/attendance${query ? `?${query}` : ''}`);
   },
+  async getAttendanceById(id) {
+    return request(`/attendance/${id}`);
+  },
   async getAttendanceByIntern(id, params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/attendance/intern/${id}${query ? `?${query}` : ''}`);
   },
 
-  // Leaves
+  // ==========================================
+  // LEAVES
+  // ==========================================
   async getLeaveRequests(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/leaves${query ? `?${query}` : ''}`);
@@ -238,7 +343,9 @@ export const api = {
     return request(`/leaves/${id}/reject`, { method: 'POST' });
   },
 
-  // Assessments
+  // ==========================================
+  // ASSESSMENTS
+  // ==========================================
   async getAssessments(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/assessments${query ? `?${query}` : ''}`);
@@ -253,7 +360,9 @@ export const api = {
     return request(`/assessments/${id}`, { method: 'DELETE' });
   },
 
-  // Reports
+  // ==========================================
+  // REPORTS
+  // ==========================================
   async getReports(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/reports${query ? `?${query}` : ''}`);
@@ -268,7 +377,9 @@ export const api = {
     return request(`/reports/intern/${id}`);
   },
 
-  // Notifications
+  // ==========================================
+  // NOTIFICATIONS
+  // ==========================================
   async getNotifications(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/notifications${query ? `?${query}` : ''}`);
@@ -283,7 +394,9 @@ export const api = {
     return request(`/notifications/${id}`, { method: 'DELETE' });
   },
 
-  // Export/Import
+  // ==========================================
+  // EXPORT/IMPORT
+  // ==========================================
   async exportInterns(params = {}) {
     return download('/export/interns', params);
   },
@@ -308,7 +421,9 @@ export const api = {
     return res.json();
   },
 
-  // Analytics / Dashboard Data
+  // ==========================================
+  // ANALYTICS / DASHBOARD
+  // ==========================================
   async getInternDashboardData() {
     return request('/analytics/dashboard/intern');
   },
@@ -330,7 +445,7 @@ export const api = {
     return request('/settings', { method: 'POST', body: JSON.stringify(payload) });
   },
 
-  // Analytics
+  // Analytics Specific
   async getWeeklyTrends(internId, weekOffset = 0) {
     return request(`/analytics/trends/weekly/${internId}?week_offset=${weekOffset}`);
   },
@@ -348,4 +463,5 @@ export const api = {
   },
 };
 
+// Export request if needed elsewhere
 export { request };

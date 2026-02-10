@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"dsi_interna_sys/internal/models"
 	"dsi_interna_sys/internal/utils"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
 )
 
@@ -20,11 +22,11 @@ type AssessmentHandler struct {
 }
 
 type updateAssessmentPayload struct {
-	QualityScore       *int   `json:"quality_score,omitempty"`
-	SpeedScore         *int   `json:"speed_score,omitempty"`
-	InitiativeScore    *int   `json:"initiative_score,omitempty"`
-	TeamworkScore      *int   `json:"teamwork_score,omitempty"`
-	CommunicationScore *int   `json:"communication_score,omitempty"`
+	QualityScore       *int    `json:"quality_score,omitempty"`
+	SpeedScore         *int    `json:"speed_score,omitempty"`
+	InitiativeScore    *int    `json:"initiative_score,omitempty"`
+	TeamworkScore      *int    `json:"teamwork_score,omitempty"`
+	CommunicationScore *int    `json:"communication_score,omitempty"`
 	Strengths          *string `json:"strengths,omitempty"`
 	Improvements       *string `json:"improvements,omitempty"`
 	Comments           *string `json:"comments,omitempty"`
@@ -109,7 +111,7 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var assessments []models.Assessment
+	var assessments []map[string]interface{}
 	for rows.Next() {
 		var a models.Assessment
 		var internName, assessorName, taskTitle sql.NullString
@@ -128,7 +130,7 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			if taskTitle.Valid {
 				a.TaskTitle = taskTitle.String
 			}
-			assessments = append(assessments, a)
+			assessments = append(assessments, presentAssessment(a))
 		}
 	}
 
@@ -193,7 +195,7 @@ func (h *AssessmentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		a.TaskTitle = taskTitle.String
 	}
 
-	utils.RespondSuccess(w, "Assessment retrieved", a)
+	utils.RespondSuccess(w, "Assessment retrieved", presentAssessment(a))
 }
 
 func (h *AssessmentHandler) GetByInternID(w http.ResponseWriter, r *http.Request) {
@@ -227,35 +229,118 @@ func (h *AssessmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate intern existence (and supervisor ownership)
+	var supervisorID sql.NullInt64
+	if err := h.db.QueryRow("SELECT supervisor_id FROM interns WHERE id = ?", req.InternID).Scan(&supervisorID); err != nil {
+		if err == sql.ErrNoRows {
+			utils.RespondBadRequest(w, "intern_id not found")
+			return
+		}
+		utils.RespondInternalError(w, "Failed to validate intern")
+		return
+	}
+	if normalizeRole(claims.Role) == "pembimbing" && supervisorID.Valid && supervisorID.Int64 != claims.UserID {
+		utils.RespondForbidden(w, "You cannot assess an intern outside your supervision")
+		return
+	}
+
+	// Resolve assessor ID to satisfy potential FK to supervisors table
+	assessorCandidates := []int64{claims.UserID}
+	if supID, ok, err := h.getSupervisorIDForUser(claims.UserID); err == nil && ok {
+		assessorCandidates = append([]int64{supID}, assessorCandidates...)
+	} else if err != nil {
+		utils.RespondInternalError(w, "Failed to validate assessor")
+		return
+	}
+	// Basic score validation to avoid DB constraint errors
+	scores := []struct {
+		name string
+		val  int
+	}{
+		{"quality_score", req.QualityScore},
+		{"speed_score", req.SpeedScore},
+		{"initiative_score", req.InitiativeScore},
+		{"teamwork_score", req.TeamworkScore},
+		{"communication_score", req.CommunicationScore},
+	}
+	for _, s := range scores {
+		if s.val < 0 || s.val > 100 {
+			utils.RespondBadRequest(w, s.name+" must be between 0 and 100")
+			return
+		}
+	}
+
 	score := (req.QualityScore + req.SpeedScore + req.InitiativeScore + req.TeamworkScore + req.CommunicationScore) / 5
 	aspect := req.Aspect
 	if strings.TrimSpace(aspect) == "" {
 		aspect = "overall"
 	}
-	assessmentDate := req.AssessmentDate
-	if assessmentDate.IsZero() {
-		assessmentDate = time.Now()
+	assessmentDate := time.Now()
+	if strings.TrimSpace(req.AssessmentDate) != "" {
+		parsed, err := time.Parse("2006-01-02", req.AssessmentDate)
+		if err != nil {
+			utils.RespondBadRequest(w, "assessment_date must be in YYYY-MM-DD format")
+			return
+		}
+		assessmentDate = parsed
 	}
 
 	var taskID sql.NullInt64
 	if req.TaskID != nil && *req.TaskID > 0 {
 		taskID = sql.NullInt64{Int64: *req.TaskID, Valid: true}
+		var taskInternID sql.NullInt64
+		err := h.db.QueryRow("SELECT intern_id FROM tasks WHERE id = ?", *req.TaskID).Scan(&taskInternID)
+		if err == sql.ErrNoRows {
+			utils.RespondBadRequest(w, "task_id not found")
+			return
+		}
+		if err != nil {
+			utils.RespondInternalError(w, "Failed to validate task")
+			return
+		}
+		if taskInternID.Valid && taskInternID.Int64 != req.InternID {
+			utils.RespondBadRequest(w, "task_id does not belong to the selected intern")
+			return
+		}
 	}
 
-	_, err := h.db.Exec(
-		`INSERT INTO assessments (intern_id, task_id, assessed_by, score, aspect, quality_score, speed_score, initiative_score,
-		                          teamwork_score, communication_score, strengths, improvements, comments, notes, assessment_date)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.InternID, taskID, claims.UserID, score, aspect,
-		req.QualityScore, req.SpeedScore, req.InitiativeScore, req.TeamworkScore, req.CommunicationScore,
-		nullIfEmpty(req.Strengths), nullIfEmpty(req.Improvements), nullIfEmpty(req.Comments), nullIfEmpty(req.Notes), assessmentDate,
-	)
-	if err != nil {
-		utils.RespondInternalError(w, "Failed to create assessment")
-		return
+	var lastErr error
+	for idx, assessorID := range assessorCandidates {
+		_, err := h.db.Exec(
+			`INSERT INTO assessments (intern_id, task_id, assessed_by, score, aspect, quality_score, speed_score, initiative_score,
+			                          teamwork_score, communication_score, strengths, improvements, comments, notes, assessment_date)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			req.InternID, taskID, assessorID, score, aspect,
+			req.QualityScore, req.SpeedScore, req.InitiativeScore, req.TeamworkScore, req.CommunicationScore,
+			nullIfEmpty(req.Strengths), nullIfEmpty(req.Improvements), nullIfEmpty(req.Comments), nullIfEmpty(req.Notes), assessmentDate,
+		)
+		if err == nil {
+			utils.RespondCreated(w, "Assessment created", nil)
+			return
+		}
+		lastErr = err
+		// If FK fails, try next candidate
+		if mysqlErr, ok := err.(*mysql.MySQLError); ok && mysqlErr.Number == 1452 && idx < len(assessorCandidates)-1 {
+			continue
+		}
+		break
 	}
 
-	utils.RespondCreated(w, "Assessment created", nil)
+	log.Printf("create assessment failed: %v", lastErr)
+	if mysqlErr, ok := lastErr.(*mysql.MySQLError); ok {
+		switch mysqlErr.Number {
+		case 1452: // foreign key constraint
+			utils.RespondBadRequest(w, "Assessor must be a registered supervisor for this database schema")
+			return
+		case 3819, 4025: // check constraint
+			utils.RespondBadRequest(w, "scores must be between 0 and 100")
+			return
+		case 1292: // incorrect date value
+			utils.RespondBadRequest(w, "assessment_date is invalid")
+			return
+		}
+	}
+	utils.RespondInternalError(w, "Failed to create assessment")
 }
 
 func (h *AssessmentHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -378,6 +463,62 @@ func (h *AssessmentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.RespondSuccess(w, "Assessment updated", nil)
+}
+
+// getSupervisorIDForUser returns supervisor.id for the given user if it exists.
+func (h *AssessmentHandler) getSupervisorIDForUser(userID int64) (int64, bool, error) {
+	var supID int64
+	err := h.db.QueryRow("SELECT id FROM supervisors WHERE user_id = ? LIMIT 1", userID).Scan(&supID)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return supID, true, nil
+}
+
+func presentAssessment(a models.Assessment) map[string]interface{} {
+	return map[string]interface{}{
+		"id":                  a.ID,
+		"intern_id":           a.InternID,
+		"task_id":             nullIntToPtr(a.TaskID),
+		"assessed_by":         a.AssessedBy,
+		"score":               a.Score,
+		"category":            a.Category,
+		"aspect":              a.Aspect,
+		"quality_score":       nullIntToPtr(a.QualityScore),
+		"speed_score":         nullIntToPtr(a.SpeedScore),
+		"initiative_score":    nullIntToPtr(a.InitiativeScore),
+		"teamwork_score":      nullIntToPtr(a.TeamworkScore),
+		"communication_score": nullIntToPtr(a.CommunicationScore),
+		"strengths":           nullStringToPtr(a.Strengths),
+		"improvements":        nullStringToPtr(a.Improvements),
+		"comments":            nullStringToPtr(a.Comments),
+		"notes":               nullStringToPtr(a.Notes),
+		"assessment_date":     a.AssessmentDate.Format("2006-01-02"),
+		"created_at":          a.CreatedAt,
+		"updated_at":          a.UpdatedAt,
+		"intern_name":         a.InternName,
+		"assessor_name":       a.AssessorName,
+		"task_title":          a.TaskTitle,
+	}
+}
+
+func nullIntToPtr(v sql.NullInt64) *int {
+	if !v.Valid {
+		return nil
+	}
+	i := int(v.Int64)
+	return &i
+}
+
+func nullStringToPtr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	s := v.String
+	return &s
 }
 
 func (h *AssessmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
