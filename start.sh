@@ -21,6 +21,7 @@ export DB_NAME="${DB_NAME:-${MYSQLDATABASE:-interna_db}}"
 export SERVER_HOST="${SERVER_HOST:-0.0.0.0}"
 export SERVER_PORT="${SERVER_PORT:-$PORT}"
 export APP_ENV="${APP_ENV:-production}"
+export UPLOAD_DIR="${UPLOAD_DIR:-$ROOT/uploads}"
 
 # Point backend SPA handler to the built frontend output
 export FRONTEND_DIST_DIR="${FRONTEND_DIST_DIR:-$ROOT/frontend/dist}"
@@ -32,7 +33,7 @@ fi
 npm run build --prefix "$ROOT/frontend"
 
 echo "==> Ensuring upload directories exist"
-mkdir -p "$ROOT/backend/uploads/tasks" "$ROOT/backend/uploads/leaves"
+mkdir -p "$UPLOAD_DIR/tasks" "$UPLOAD_DIR/leaves"
 
 echo "==> Building backend"
 mkdir -p "$ROOT/bin"
