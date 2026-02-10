@@ -513,14 +513,6 @@ func nullIntToPtr(v sql.NullInt64) *int {
 	return &i
 }
 
-func nullStringToPtr(v sql.NullString) *string {
-	if !v.Valid {
-		return nil
-	}
-	s := v.String
-	return &s
-}
-
 func (h *AssessmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	claims, ok := middleware.GetUserFromContext(r.Context())
 	if !ok {

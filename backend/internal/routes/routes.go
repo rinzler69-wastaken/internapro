@@ -229,10 +229,17 @@ func newSPAHandler(staticDir string) http.Handler {
 }
 
 // getFrontendDistDir returns the path to the built frontend directory.
-// Defaults to ../frontend/dist relative to the backend folder, but can be overridden via FRONTEND_DIST_DIR.
+// Defaults to ../frontend/dist relative to the compiled binary, but can be overridden via FRONTEND_DIST_DIR.
 func getFrontendDistDir() string {
 	if custom := os.Getenv("FRONTEND_DIST_DIR"); custom != "" {
 		return custom
 	}
-	return filepath.Clean("../frontend/dist")
+
+	if exe, err := os.Executable(); err == nil {
+		base := filepath.Dir(exe)
+		return filepath.Clean(filepath.Join(base, "../frontend/dist"))
+	}
+
+	// Fallback to relative path from current working directory
+	return filepath.Clean("./frontend/dist")
 }

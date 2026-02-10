@@ -1,0 +1,2477 @@
+{
+  "tables": [
+    {
+      "name": "assessment",
+      "go_struct_name": "Assessment",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "intern_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "task_i_d",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullInt64",
+          "tags": {
+            "json": "task_id,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "assessed_by",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "assessed_by"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "score",
+          "type": "INTEGER",
+          "go_type": "int",
+          "tags": {
+            "json": "score"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "category",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "category"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "aspect",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "aspect"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "quality_score",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullInt64",
+          "tags": {
+            "json": "quality_score,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "speed_score",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullInt64",
+          "tags": {
+            "json": "speed_score,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "initiative_score",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullInt64",
+          "tags": {
+            "json": "initiative_score,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "teamwork_score",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullInt64",
+          "tags": {
+            "json": "teamwork_score,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "communication_score",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullInt64",
+          "tags": {
+            "json": "communication_score,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "strengths",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "strengths,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "improvements",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "improvements,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "comments",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "comments,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "notes",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "notes,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "assessment_date",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "assessment_date"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "intern_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "assessor_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "assessor_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "task_title",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "task_title,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "attendance",
+      "go_struct_name": "Attendance",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "intern_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "date",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "date"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "check_in_time",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "check_in_time"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "check_in_latitude",
+          "type": "DOUBLE",
+          "go_type": "*float64",
+          "tags": {
+            "json": "check_in_latitude"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "check_in_longitude",
+          "type": "DOUBLE",
+          "go_type": "*float64",
+          "tags": {
+            "json": "check_in_longitude"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "check_out_time",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "check_out_time"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "check_out_latitude",
+          "type": "DOUBLE",
+          "go_type": "*float64",
+          "tags": {
+            "json": "check_out_latitude"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "check_out_longitude",
+          "type": "DOUBLE",
+          "go_type": "*float64",
+          "tags": {
+            "json": "check_out_longitude"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "status"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "late_reason",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "late_reason"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "notes",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "notes,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "distance_meters",
+          "type": "INTEGER",
+          "go_type": "*int",
+          "tags": {
+            "json": "distance_meters,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "proof_file",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "proof_file,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "intern_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "office_settings",
+      "go_struct_name": "OfficeSettings",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "latitude",
+          "type": "DOUBLE",
+          "go_type": "float64",
+          "tags": {
+            "json": "latitude"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "longitude",
+          "type": "DOUBLE",
+          "go_type": "float64",
+          "tags": {
+            "json": "longitude"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "radius_meters",
+          "type": "INTEGER",
+          "go_type": "int",
+          "tags": {
+            "json": "radius_meters"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "check_in_time",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "check_in_time"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "check_out_time",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "check_out_time"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "late_tolerance_minutes",
+          "type": "INTEGER",
+          "go_type": "int",
+          "tags": {
+            "json": "late_tolerance_minutes"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "intern",
+      "go_struct_name": "Intern",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "user_i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "user_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "institution_i_d",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullInt64",
+          "tags": {
+            "json": "institution_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "supervisor_i_d",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullInt64",
+          "tags": {
+            "json": "supervisor_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "full_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "full_name"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "n_i_s",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "nis"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "student_i_d",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "student_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "school",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "school"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "department",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "department"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "date_of_birth",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullTime",
+          "tags": {
+            "json": "date_of_birth"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "gender",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "gender"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "phone",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "phone"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "address",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "address"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "start_date",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "start_date"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "end_date",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "end_date"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "status"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "certificate_number",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "certificate_number,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "certificate_issued_at",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullTime",
+          "tags": {
+            "json": "certificate_issued_at,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "user",
+          "type": "VARCHAR(255)",
+          "go_type": "*User",
+          "tags": {
+            "json": "user,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "institution",
+          "type": "VARCHAR(255)",
+          "go_type": "*Institution",
+          "tags": {
+            "json": "institution,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "supervisor",
+          "type": "VARCHAR(255)",
+          "go_type": "*Supervisor",
+          "tags": {
+            "json": "supervisor,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "leave_request",
+      "go_struct_name": "LeaveRequest",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "intern_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "leave_type",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "leave_type"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "start_date",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "start_date"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "end_date",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "end_date"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "reason",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "reason"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "attachment_path",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "attachment_path,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "status"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "approved_by",
+          "type": "BIGINT",
+          "go_type": "*int64",
+          "tags": {
+            "json": "approved_by,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "approved_at",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "approved_at,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "intern_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "approver_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "approver_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "notification",
+      "go_struct_name": "Notification",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "user_i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "user_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "type",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "type"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "title",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "title"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "message",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "message"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "icon",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "icon,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "link",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "link,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "data",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "data,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "read_at",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullTime",
+          "tags": {
+            "json": "read_at,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "report",
+      "go_struct_name": "Report",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "intern_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_by",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "created_by"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "title",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "title"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "content",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "content"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "type",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "type"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "period_start",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "period_start"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "period_end",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "period_end"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "status"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "feedback",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "feedback,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "intern_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_by_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "created_by_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "setting",
+      "go_struct_name": "Setting",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "key",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "key"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "value",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "value"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "type",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "type"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "description",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "description,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "task",
+      "go_struct_name": "Task",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "task_assignment_i_d",
+          "type": "BIGINT",
+          "go_type": "*int64",
+          "tags": {
+            "json": "task_assignment_id,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_i_d",
+          "type": "BIGINT",
+          "go_type": "*int64",
+          "tags": {
+            "json": "intern_id,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "assigned_by",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "assigned_by"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "title",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "title"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "description",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "description,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "priority",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "priority"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "status"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "start_date",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "start_date,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "deadline",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "deadline,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "deadline_time",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "deadline_time,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "started_at",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "started_at,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "submitted_at",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "submitted_at,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "completed_at",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "completed_at,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "approved_at",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "approved_at,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "is_late",
+          "type": "BOOLEAN",
+          "go_type": "bool",
+          "tags": {
+            "json": "is_late"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "submission_notes",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "submission_notes,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "submission_links",
+          "type": "JSON",
+          "go_type": "[]SubmissionLink",
+          "tags": {
+            "json": "submission_links,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "score",
+          "type": "INTEGER",
+          "go_type": "*int",
+          "tags": {
+            "json": "score,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "admin_feedback",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "admin_feedback,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "intern_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "intern_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "assigned_by_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "assigned_by_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "task_assignment",
+      "go_struct_name": "TaskAssignment",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "title",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "title"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "description",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "description,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "assigned_by",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "assigned_by"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "priority",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "priority"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "start_date",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "start_date,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "deadline",
+          "type": "TIMESTAMP",
+          "go_type": "*time.Time",
+          "tags": {
+            "json": "deadline,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "deadline_time",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "deadline_time,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "assign_to_all",
+          "type": "BOOLEAN",
+          "go_type": "bool",
+          "tags": {
+            "json": "assign_to_all"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "assigned_by_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "assigned_by_name,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "tasks_count",
+          "type": "INTEGER",
+          "go_type": "int",
+          "tags": {
+            "json": "tasks_count,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "task_attachment",
+      "go_struct_name": "TaskAttachment",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "task_i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "task_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "file_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "file_name"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "file_path",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "file_path"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "file_type",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "file_type"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "file_size",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "file_size"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "uploaded_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "uploaded_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "user",
+      "go_struct_name": "User",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "name"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "email",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "email"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "email_verified_at",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullTime",
+          "tags": {
+            "json": "email_verified_at,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "password_hash",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "-"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "role",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "role"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "avatar",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "avatar,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "google_i_d",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "-"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "provider",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "-"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "t_o_t_p_secret",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "-"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "is2_f_a_enabled",
+          "type": "BOOLEAN",
+          "go_type": "bool",
+          "tags": {
+            "json": "is_2fa_enabled"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "google2_f_a_secret",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "-"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "google2_f_a_enabled",
+          "type": "BOOLEAN",
+          "go_type": "bool",
+          "tags": {
+            "json": "google2fa_enabled"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "two_factor_secret",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "-"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "two_factor_recovery",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullString",
+          "tags": {
+            "json": "-"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "two_factor_confirmed",
+          "type": "VARCHAR(255)",
+          "go_type": "sql.NullTime",
+          "tags": {
+            "json": "-"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "supervisor",
+      "go_struct_name": "Supervisor",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "user_i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "user_id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "full_name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "full_name"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "email",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "email"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "n_i_p",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "nip,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "phone",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "phone,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "position",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "position,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "address",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "address,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "institution",
+          "type": "VARCHAR(255)",
+          "go_type": "*string",
+          "tags": {
+            "json": "institution,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "status"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "interns_count",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "interns_count,omitempty"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    },
+    {
+      "name": "institution",
+      "go_struct_name": "Institution",
+      "fields": [
+        {
+          "name": "i_d",
+          "type": "BIGINT",
+          "go_type": "int64",
+          "tags": {
+            "json": "id"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "name"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "address",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "address"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "phone",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "phone"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "email",
+          "type": "VARCHAR(255)",
+          "go_type": "string",
+          "tags": {
+            "json": "email"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "created_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP",
+          "go_type": "time.Time",
+          "tags": {
+            "json": "updated_at"
+          },
+          "is_primary_key": false,
+          "is_nullable": false,
+          "is_unique": false,
+          "is_foreign_key": false
+        }
+      ]
+    }
+  ],
+  "metadata": {}
+}

@@ -15,7 +15,7 @@
     pendingInternsList: [],
     overdueTasks: 0,
     inProgressTasks: 0,
-    completedLate: 0,
+    // completedLate: 0,
     attendanceTrend: [],
     submittedTasks: []
   });
