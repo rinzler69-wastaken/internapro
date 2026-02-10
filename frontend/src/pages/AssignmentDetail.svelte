@@ -118,6 +118,10 @@
                             <span class="stat-label">Proses</span>
                             <span class="stat-val">{data.stats.in_progress}</span>
                         </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Nilai Rata-rata</span>
+                            <span class="stat-val">{data.stats.average_score || 0}</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -137,6 +141,8 @@
                                     <th>Judul / Subtask</th>
                                     <th>Siswa</th>
                                     <th>Status</th>
+                                    <th>Dikumpulkan</th>
+                                    <th>Nilai</th>
                                     <th class="text-right">Aksi</th>
                                 </tr>
                             </thead>
@@ -156,6 +162,23 @@
                                             <span class={`status-badge ${getStatusColor(t.status)}`}>
                                                 {getStatusLabel(t.status)}
                                             </span>
+                                        </td>
+                                        <td>
+                                            {#if t.submitted_at}
+                                                {new Date(t.submitted_at).toLocaleDateString('id-ID', { day:'2-digit', month:'short' })} {new Date(t.submitted_at).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' })}
+                                                {#if t.is_late}
+                                                    <span class="chip-late">Terlambat</span>
+                                                {/if}
+                                            {:else}
+                                                -
+                                            {/if}
+                                        </td>
+                                        <td>
+                                            {#if t.score !== null && t.score !== undefined}
+                                                <span class="score-pill">{t.score}</span>
+                                            {:else}
+                                                <span class="text-slate-400">-</span>
+                                            {/if}
                                         </td>
                                         <td class="text-right">
                                             <a href={`/tasks/${t.id}`} class="btn-icon" title="Lihat Detail">
@@ -318,6 +341,8 @@
   .bg-amber-soft { background: #fffbeb; } .text-amber { color: #d97706; }
   .bg-slate-soft { background: #f1f5f9; } .text-slate { color: #64748b; }
   .bg-red-soft { background: #fef2f2; } .text-red { color: #dc2626; }
+  .chip-late { background: #fef2f2; color: #b91c1c; padding: 2px 6px; border-radius: 8px; font-size: 11px; font-weight: 700; margin-left: 6px; }
+  .score-pill { background: #ecfdf3; color: #047857; padding: 4px 10px; border-radius: 10px; font-weight: 700; }
 
   .text-right { text-align: right; }
   .btn-icon {

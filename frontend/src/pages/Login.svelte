@@ -235,9 +235,6 @@
              Akun Anda sedang menunggu persetujuan admin.
            </p>
         </div>
-        <button class="btn btn-danger-outline" onclick={handleCancelRegistration}>
-          Batalkan Pendaftaran & Hapus Akun
-        </button>
       </div>
 
       <button class="btn btn-outline" onclick={() => { pendingApproval = false; auth.logout(); }}>

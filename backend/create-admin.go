@@ -137,9 +137,9 @@ var taskDescriptions = []string{
 }
 
 var supervisorSeeds = []supervisorSeed{
-	{Name: "Bambang Agus Herlambang, M.Kom", Email: "bambang.herlambang@internapro.id", NIP: "198501234567891001"},
-	{Name: "Noora Qotrun Nada, S.T., M.T.", Email: "noora@internapro.id", NIP: "198601234567891002"},
-	{Name: "Mega Novita, Ph.D", Email: "mega.novita@internapro.id", NIP: "198701234567891003"},
+	{Name: "Bambang Agus Herlambang, M.Kom", Email: "bambang.herlambang@dsi_interna_sys.id", NIP: "198501234567891001"},
+	{Name: "Noora Qotrun Nada, S.T., M.T.", Email: "noora@dsi_interna_sys.id", NIP: "198601234567891002"},
+	{Name: "Mega Novita, Ph.D", Email: "mega.novita@dsi_interna_sys.id", NIP: "198701234567891003"},
 }
 
 func main() {
@@ -208,7 +208,7 @@ func openDB() *sql.DB {
 
 func seedAdmin(db *sql.DB) int64 {
 	fmt.Println("Creating admin account...")
-	adminID, err := createOrGetUser(db, "Administrator", "admin@internapro.id", "password", "admin")
+	adminID, err := createOrGetUser(db, "Administrator", "admin@dsi_interna_sys.id", "password", "admin")
 	if err != nil {
 		log.Fatal("Failed to create admin:", err)
 	}
@@ -319,8 +319,22 @@ func seedTaskAssignments(db *sql.DB, adminID int64, interns []internSeed, assign
 		startDate := time.Now().AddDate(0, 0, rand.Intn(10)-3)
 		deadlineTime := fmt.Sprintf("%02d:00:00", rand.Intn(5)+14)
 		assignToAll := i < 2
+		// Assignment-level status mirrors one of the task statuses for dashboard stats
+		assignmentStatus := allStatuses[rand.Intn(len(allStatuses))]
+		var submittedAt *time.Time
+		var grade *int
+		isLate := false
+		if assignmentStatus == "submitted" || assignmentStatus == "revision" || assignmentStatus == "completed" {
+			t := deadline.Add(-time.Duration(rand.Intn(48)) * time.Hour)
+			submittedAt = &t
+			isLate = t.After(deadline)
+		}
+		if assignmentStatus == "completed" {
+			g := rand.Intn(31) + 70 // 70-100
+			grade = &g
+		}
 
-		assignmentID, err := insertTaskAssignment(db, adminID, title, desc, priority, startDate, deadline, deadlineTime, assignToAll)
+		assignmentID, err := insertTaskAssignment(db, adminID, title, desc, priority, assignmentStatus, startDate, deadline, deadlineTime, submittedAt, isLate, grade, assignToAll)
 		if err != nil {
 			log.Println("⚠️  Task assignment create failed:", err)
 			continue
@@ -340,6 +354,13 @@ func seedTaskAssignments(db *sql.DB, adminID int64, interns []internSeed, assign
 				continue
 			}
 			tasks = append(tasks, taskSeed{ID: taskID, InternID: intern.ID, Status: status})
+		}
+
+		// Mirror intern_id on assignment when it targets a single intern
+		if !assignToAll && len(assigned) >= 1 {
+			if _, err := db.Exec(`UPDATE task_assignments SET intern_id = ? WHERE id = ?`, assigned[0].ID, assignmentID); err != nil {
+				log.Println("⚠️  Failed to set intern_id on assignment:", err)
+			}
 		}
 	}
 
@@ -472,15 +493,26 @@ func seedNotifications(db *sql.DB, adminID int64, supervisorIDs []int64, interns
 func insertTaskAssignment(
 	db *sql.DB,
 	adminID int64,
-	title, desc, priority string,
+	title, desc, priority, status string,
 	startDate, deadline time.Time,
 	deadlineTime string,
+	submittedAt *time.Time,
+	isLate bool,
+	grade *int,
 	assignToAll bool,
 ) (int64, error) {
 	res, err := db.Exec(`
-		INSERT INTO task_assignments (title, description, assigned_by, priority, start_date, deadline, deadline_time, assign_to_all)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, title, desc, adminID, priority, startDate.Format("2006-01-02"), deadline.Format("2006-01-02"), deadlineTime, assignToAll)
+		INSERT INTO task_assignments (
+			title, description, assigned_by, priority, status,
+			start_date, deadline, deadline_time,
+			submitted_at, is_late, grade, assign_to_all
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		title, desc, adminID, priority, status,
+		startDate.Format("2006-01-02"), deadline.Format("2006-01-02"), deadlineTime,
+		submittedAt, isLate, grade, assignToAll,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -872,13 +904,13 @@ func printSummary() {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println("")
 	fmt.Println("👤 Admin Account:")
-	fmt.Println("   Email:    admin@internapro.id")
+	fmt.Println("   Email:    admin@dsi_interna_sys.id")
 	fmt.Println("   Password: password")
 	fmt.Println("")
 	fmt.Println("👨‍💼 Supervisor Accounts:")
-	fmt.Println("   - bambang.herlambang@internapro.id")
-	fmt.Println("   - khamizar@internapro.id")
-	fmt.Println("   - mega.novita@internapro.id")
+	fmt.Println("   - bambang.herlambang@dsi_interna_sys.id")
+	fmt.Println("   - khamizar@dsi_interna_sys.id")
+	fmt.Println("   - mega.novita@dsi_interna_sys.id")
 	fmt.Println("   Password: password")
 	fmt.Println("")
 	fmt.Println("👩‍💻 Intern Accounts:")

@@ -98,7 +98,7 @@ class ApiClient {
   }
 
   // ==========================================
-  // ADMIN & INTERN MANAGEMENT (DITAMBAHKAN)
+  // ADMIN & INTERN MANAGEMENT
   // ==========================================
   
   async getAdminDashboard() {
@@ -118,6 +118,25 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data)
     });
+  }
+
+  async updateIntern(id, data) {
+    return this.request(`/admin/interns/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async deleteIntern(id) {
+    return this.request(`/admin/interns/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async getSupervisors(params = {}) {
+    const queryString = new URLSearchParams(params).toString();
+    const endpoint = `/supervisors${queryString ? '?' + queryString : ''}`;
+    return this.request(endpoint);
   }
 
   // FUNGSI PENTING UNTUK TOMBOL APPROVE
@@ -263,6 +282,15 @@ class ApiClient {
     return this.request('/assessments', {
       method: 'POST',
       body: JSON.stringify(assessmentData),
+    });
+  }
+
+  // ==========================================
+  // Generic DELETE method
+  // ==========================================
+  async delete(endpoint) {
+    return this.request(endpoint, {
+      method: 'DELETE'
     });
   }
 }

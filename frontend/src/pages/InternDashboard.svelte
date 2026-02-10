@@ -304,25 +304,31 @@ const canCheckIn = $derived(
       const history30 = last30Res.data || [];
 
       // Parse today's attendance (align with Attendance.svelte structure)
-      const todayData = todayRes.data?.attendance || todayRes.data || null;
-      if (todayRes.data?.off_day) {
+      const rawToday = todayRes.data || {};
+      const todayData = rawToday.attendance || (rawToday.id ? rawToday : null);
+
+      if (rawToday.off_day) {
         todayAttendance = {
-          status: todayRes.data?.status || 'off',
+          status: rawToday.status || 'off',
           off_day: true,
-          date: todayRes.data?.date,
-          message: todayRes.data?.message || 'Tidak ada jadwal kantor!',
-          note: todayRes.data?.note || 'Selamat beristirahat!',
+          date: rawToday.date,
+          message: rawToday.message || 'Tidak ada jadwal kantor!',
+          note: rawToday.note || 'Selamat beristirahat!',
         };
-      } else if (!todayRes.data?.checked_in && todayRes.data?.closed_today) {
+      } else if (!rawToday.checked_in && rawToday.closed_today) {
         todayAttendance = {
           status: 'absent',
-          date: todayRes.data?.date,
+          date: rawToday.date,
           check_in_time: null,
           check_out_time: null,
           closed_today: true,
         };
-      } else {
+      } else if (todayData) {
+        // Actual attendance record exists
         todayAttendance = todayData;
+      } else {
+        // No attendance yet today; keep null so check-in stays enabled
+        todayAttendance = null;
       }
 
       // Calculate task stats

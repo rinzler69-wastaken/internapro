@@ -8,6 +8,7 @@
   import WaitingApproval from './WaitingApproval.svelte';
 
   const userRole = $derived(auth.user?.role);
+  const isManager = $derived(['admin', 'supervisor', 'pembimbing'].includes(userRole));
 
   let loading = $state(false);
   let internProfile = $state(null);
@@ -34,7 +35,7 @@
   });
 </script>
 
-{#if userRole === 'admin' || userRole === 'supervisor'}
+{#if isManager}
   <AdminDashboard />
 {:else if userRole === 'intern'}
   {#if loading}
@@ -42,7 +43,8 @@
       <div class="animate-pulse text-slate-400">Memuat profil...</div>
     </div>
   {:else if !internProfile || !internProfile.id}
-    <InternDashboard intern={internProfile} />
+    <!-- <InternDashboard intern={internProfile} /> -->
+    <InternDashboard />
   {:else if internProfile?.status === 'pending'}
     <WaitingApproval />
   {:else}

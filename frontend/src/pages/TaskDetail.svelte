@@ -8,12 +8,15 @@
   let task = $state(null);
   let loading = $state(true);
   let submissionNotes = $state('');
+  let submissionFile = $state(null);
   let links = $state([{ label: '', url: '' }]);
   let reviewAction = $state('approve');
   let reviewScore = $state(80);
   let reviewFeedback = $state('');
   let statusUpdate = $state('pending');
   let submitting = $state(false);
+  let showSubmissionForm = $state(true);
+  let showReviewForm = $state(false);
 
   // --- HELPERS ---
   const statusLabels = {
@@ -50,6 +53,21 @@
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
   }
+  function formatTime(value) {
+    if (!value) return '';
+    return value.slice(0,5);
+  }
+
+  function withBase(url) {
+    if (!url) return '';
+    const needsToken = url.startsWith('/uploads') || url.startsWith('uploads/');
+    const token = auth.token;
+    const tokenQS = needsToken && token ? `${url.includes('?') ? '&' : '?'}token=${token}` : '';
+    if (url.startsWith('http')) return `${url}${tokenQS}`;
+    const base = import.meta.env.VITE_API_URL || '';
+    const normalized = url.startsWith('/') ? url : `/${url}`;
+    return `${base}${normalized}${tokenQS}`;
+  }
 
   // --- API CALLS ---
   async function fetchTask() {
@@ -58,6 +76,15 @@
       const res = await api.getTask(taskId);
       task = res.data;
       statusUpdate = task.status;
+      reviewScore = task.score ?? 80;
+      reviewFeedback = task.admin_feedback ?? '';
+      showSubmissionForm = auth.user?.role === 'intern' && !['submitted','completed'].includes(task.status);
+      showReviewForm = auth.user?.role !== 'intern' && task.status === 'submitted';
+
+      // prefill links if needed
+      if (task.submission_links && Array.isArray(task.submission_links) && task.submission_links.length > 0) {
+        links = task.submission_links;
+      }
       
       // Jika ada submission sebelumnya, bisa di-load ke state (opsional, tergantung struktur API)
       // Disini kita asumsi reset form submission
@@ -79,7 +106,14 @@
   async function submitTask() {
     submitting = true;
     try {
-      await api.submitTask(task.id, { submission_notes: submissionNotes, links });
+      const formData = new FormData();
+      formData.append('submission_notes', submissionNotes);
+      formData.append('links', JSON.stringify(links));
+      if (submissionFile) {
+        formData.append('file', submissionFile);
+      }
+
+      await api.submitTask(task.id, formData);
       await fetchTask();
       alert('Tugas berhasil dikumpulkan!');
     } catch (err) {
@@ -179,7 +213,32 @@
                                 <span class="label">Pukul</span>
                                 <div class="value flex items-center gap-2">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-500"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                    {task.deadline_time}
+                                    {formatTime(task.deadline_time)}
+                                </div>
+                            </div>
+                        {/if}
+                        {#if task.start_date}
+                            <div class="meta-item">
+                                <span class="label">Mulai</span>
+                                <div class="value flex items-center gap-2">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3v4"/><path d="M19 3v4"/><rect width="14" height="14" x="5" y="7" rx="2"/><path d="M12 11h4v4"/></svg>
+                                    {formatDate(task.start_date)}
+                                </div>
+                            </div>
+                        {/if}
+                        <div class="meta-item">
+                            <span class="label">Diberikan Oleh</span>
+                            <div class="value flex items-center gap-2">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5.5 21h13M12 17c-2.5-2-4-4-4-6a4 4 0 1 1 8 0c0 2-1.5 4-4 6Z"/></svg>
+                                {task.assigned_by_name || '-'}
+                            </div>
+                        </div>
+                        {#if task.intern_name}
+                            <div class="meta-item">
+                                <span class="label">Ditugaskan ke</span>
+                                <div class="value flex items-center gap-2">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M6 21v-1a6 6 0 0 1 12 0v1"/></svg>
+                                    {task.intern_name}
                                 </div>
                             </div>
                         {/if}
@@ -191,111 +250,168 @@
                             {task.description || 'Tidak ada deskripsi detail untuk tugas ini.'}
                         </p>
                     </div>
-
-                    <!-- Jika sudah dinilai -->
-                    {#if task.grade}
-                        <div class="grade-box">
-                            <div class="grade-label">Nilai Akhir</div>
-                            <div class="grade-value">{task.grade}</div>
-                            {#if task.feedback}
-                                <div class="grade-feedback">"{task.feedback}"</div>
-                            {/if}
-                        </div>
-                    {/if}
                 </div>
             </div>
 
             <!-- KOLOM KANAN: AKSI (INTERN / ADMIN) -->
             <div class="action-column">
                 
-                {#if auth.user?.role === 'intern'}
-                    <!-- INTERN ACTIONS -->
-                    
-                    <!-- 1. Update Status -->
+                <!-- SUBMISSION INFO CARD -->
+                {#if (task.submission_links && task.submission_links.length > 0) || task.score}
                     <div class="card mb-6">
                         <div class="card-header border-b">
-                            <h4>Update Status</h4>
+                            <h4>Detail Pengumpulan & Penilaian</h4>
                         </div>
                         <div class="card-body">
-                            <div class="status-control">
-                                <select class="input-field select" bind:value={statusUpdate}>
-                                    <option value="pending">Pending</option>
-                                    <option value="in_progress">Sedang Dikerjakan</option>
-                                </select>
-                                <button class="btn-outline w-full mt-3" onclick={updateStatus}>Update Status</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 2. Submission Form -->
-                    <div class="card">
-                        <div class="card-header border-b bg-green-50/30">
-                            <h4>Pengumpulan Tugas</h4>
-                        </div>
-                        <div class="card-body">
-                            <div class="form-group mb-4">
-                                <label class="label" for="notes">Catatan Pengerjaan</label>
-                                <textarea class="input-field textarea" id="notes" rows="4" bind:value={submissionNotes} placeholder="Jelaskan apa yang sudah Anda kerjakan..."></textarea>
-                            </div>
-
-                            <div class="form-group mb-4">
-                                <label class="label">Lampiran Link</label>
-                                {#each links as link, index}
-                                    <div class="link-row mb-2">
-                                        <input class="input-field" placeholder="Judul (mis: Github)" bind:value={link.label} />
-                                        <input class="input-field" placeholder="https://..." bind:value={link.url} />
-                                        {#if links.length > 1}
-                                            <button class="btn-remove" onclick={() => removeLink(index)} title="Hapus">×</button>
-                                        {/if}
+                            {#if task.submission_links && task.submission_links.length > 0}
+                                <div class="submission-box" style="margin-top: 0;">
+                                    <div class="desc-label">Link Pengumpulan</div>
+                                    <div class="links-list">
+                                        {#each task.submission_links as link}
+                                            <a class="link-pill" href={link.url} target="_blank" rel="noreferrer">
+                                                <span>{link.label}</span>
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+                                            </a>
+                                        {/each}
                                     </div>
-                                {/each}
-                                <button class="btn-text" onclick={addLink}>+ Tambah Link Lain</button>
-                            </div>
-
-                            <button class="btn-primary w-full" onclick={submitTask} disabled={submitting}>
-                                {#if submitting}Mengirim...{:else}Kirim Tugas{/if}
-                            </button>
-                        </div>
-                    </div>
-
-                {:else}
-                    <!-- ADMIN/SUPERVISOR ACTIONS -->
-                    <div class="card">
-                        <div class="card-header border-b bg-blue-50/30">
-                            <h4>Review Tugas</h4>
-                        </div>
-                        <div class="card-body">
-                            <div class="form-group mb-4">
-                                <label class="label">Keputusan</label>
-                                <div class="radio-group">
-                                    <label class={`radio-btn ${reviewAction === 'approve' ? 'active-green' : ''}`}>
-                                        <input type="radio" value="approve" bind:group={reviewAction} hidden>
-                                        ✓ Terima
-                                    </label>
-                                    <label class={`radio-btn ${reviewAction === 'revision' ? 'active-red' : ''}`}>
-                                        <input type="radio" value="revision" bind:group={reviewAction} hidden>
-                                        ↺ Revisi
-                                    </label>
-                                </div>
-                            </div>
-
-                            {#if reviewAction === 'approve'}
-                                <div class="form-group mb-4 animate-fade-in">
-                                    <label class="label" for="score">Nilai (0-100)</label>
-                                    <input class="input-field score-input" type="number" min="0" max="100" bind:value={reviewScore} id="score" />
+                                    {#if task.submission_file}
+                                        <div class="desc-label mt-4">File Terlampir</div>
+                                        <a class="link-pill" href={withBase(task.submission_file)} target="_blank" rel="noreferrer">
+                                            <span>Unduh File</span>
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                        </a>
+                                    {/if}
+                                    {#if task.submission_notes}
+                                        <div class="notes-box">{task.submission_notes}</div>
+                                    {/if}
                                 </div>
                             {/if}
 
-                            <div class="form-group mb-4">
-                                <label class="label" for="feedback">Feedback / Komentar</label>
-                                <textarea class="input-field textarea" rows="3" bind:value={reviewFeedback} id="feedback" placeholder="Berikan masukan..."></textarea>
-                            </div>
-
-                            <button class="btn-primary w-full" onclick={reviewTask} disabled={submitting}>
-                                {#if submitting}Menyimpan...{:else}Simpan Review{/if}
-                            </button>
+                            {#if task.score}
+                                <div class="grade-box" style={task.submission_links?.length ? 'margin-top: 16px;' : 'margin-top: 0;'}>
+                                    <div class="grade-label">Nilai Akhir</div>
+                                    <div class="grade-value">{task.score}</div>
+                                    {#if task.admin_feedback}
+                                        <div class="grade-feedback">"{task.admin_feedback}"</div>
+                                    {/if}
+                                </div>
+                            {/if}
                         </div>
                     </div>
+                {/if}
+                
+                {#if auth.user?.role === 'intern'}
+                    <!-- INTERN ACTIONS -->
+                    
+                    {#if task.status === 'pending' || task.status === 'in_progress'}
+                      <!-- 1. Update Status -->
+                      <div class="card mb-6">
+                          <div class="card-header border-b">
+                              <h4>Update Status</h4>
+                          </div>
+                          <div class="card-body">
+                              <div class="status-control">
+                                  <select class="input-field select" bind:value={statusUpdate}>
+                                      <option value="pending">Pending</option>
+                                      <option value="in_progress">Sedang Dikerjakan</option>
+                                  </select>
+                                  <button class="btn-outline w-full mt-3" onclick={updateStatus}>Update Status</button>
+                              </div>
+                          </div>
+                      </div>
+                    {/if}
+
+                    {#if showSubmissionForm}
+                      <!-- 2. Submission Form -->
+                      <div class="card">
+                          <div class="card-header border-b bg-green-50/30">
+                              <h4>{task.status === 'revision' ? 'Kumpulkan Revisi' : 'Pengumpulan Tugas'}</h4>
+                          </div>
+                          <div class="card-body">
+                              <div class="form-group mb-4">
+                                  <label class="label" for="notes">Catatan Pengerjaan</label>
+                                  <textarea class="input-field textarea" id="notes" rows="4" bind:value={submissionNotes} placeholder="Jelaskan apa yang sudah Anda kerjakan..."></textarea>
+                              </div>
+
+                              {#if task.submission_method === 'links' || task.submission_method === 'both' || !task.submission_method}
+                                <div class="form-group mb-4">
+                                    <label class="label">Lampiran Link</label>
+                                    {#each links as link, index}
+                                        <div class="link-row mb-2">
+                                            <input class="input-field" placeholder="Judul (mis: Github)" bind:value={link.label} />
+                                            <input class="input-field" placeholder="https://..." bind:value={link.url} />
+                                            {#if links.length > 1}
+                                                <button class="btn-remove" onclick={() => removeLink(index)} title="Hapus">×</button>
+                                            {/if}
+                                        </div>
+                                    {/each}
+                                    <button class="btn-text" onclick={addLink}>+ Tambah Link Lain</button>
+                                </div>
+                              {/if}
+
+                              {#if task.submission_method === 'files' || task.submission_method === 'both'}
+                                <div class="form-group mb-4">
+                                    <label class="label">Unggah File</label>
+                                    <div class="file-input-wrapper">
+                                      <input 
+                                        type="file" 
+                                        class="input-field" 
+                                        onchange={(e) => submissionFile = e.target.files[0]} 
+                                      />
+                                      {#if submissionFile}
+                                        <p class="text-xs text-emerald-600 mt-1">File terpilih: {submissionFile.name}</p>
+                                      {/if}
+                                    </div>
+                                </div>
+                              {/if}
+
+                              <button class="btn-primary w-full" onclick={submitTask} disabled={submitting}>
+                                  {#if submitting}Mengirim...{:else}Kirim Tugas{/if}
+                              </button>
+                          </div>
+                      </div>
+                    {/if}
+
+                {:else}
+                    <!-- ADMIN/SUPERVISOR ACTIONS -->
+                    {#if showReviewForm}
+                      <div class="card">
+                          <div class="card-header border-b bg-blue-50/30">
+                              <h4>Review Tugas</h4>
+                          </div>
+                          <div class="card-body">
+                              <div class="form-group mb-4">
+                                  <label class="label">Keputusan</label>
+                                  <div class="radio-group">
+                                      <label class={`radio-btn ${reviewAction === 'approve' ? 'active-green' : ''}`}>
+                                          <input type="radio" value="approve" bind:group={reviewAction} hidden>
+                                          ✓ Terima
+                                      </label>
+                                      <label class={`radio-btn ${reviewAction === 'revision' ? 'active-red' : ''}`}>
+                                          <input type="radio" value="revision" bind:group={reviewAction} hidden>
+                                          ↺ Revisi
+                                      </label>
+                                  </div>
+                              </div>
+
+                              {#if reviewAction === 'approve'}
+                                  <div class="form-group mb-4 animate-fade-in">
+                                      <label class="label" for="score">Nilai (0-100)</label>
+                                      <input class="input-field score-input" type="number" min="0" max="100" bind:value={reviewScore} id="score" />
+                                  </div>
+                              {/if}
+
+                              <div class="form-group mb-4">
+                                  <label class="label" for="feedback">Feedback / Komentar</label>
+                                  <textarea class="input-field textarea" rows="3" bind:value={reviewFeedback} id="feedback" placeholder="Berikan masukan..."></textarea>
+                              </div>
+
+                              <button class="btn-primary w-full" onclick={reviewTask} disabled={submitting}>
+                                  {#if submitting}Menyimpan...{:else}Simpan Review{/if}
+                              </button>
+                          </div>
+                      </div>
+                    {/if}
                 {/if}
 
             </div>
@@ -312,12 +428,12 @@
     background-color: #f8fafc;
     background-image: radial-gradient(at 0% 0%, rgba(16, 185, 129, 0.03) 0%, transparent 50%),
                       radial-gradient(at 100% 100%, rgba(14, 165, 233, 0.03) 0%, transparent 50%);
-    padding: 32px 24px;
+    padding: 20px 16px;
   }
-  .container { max-width: 1100px; margin: 0 auto; }
+  .container { max-width: 1400px; margin: 0 auto; }
 
   /* HEADER */
-  .header { margin-bottom: 32px; }
+  .header { margin-bottom: 20px; }
   .title { font-size: 28px; font-weight: 800; color: #0f172a; margin: 0 0 6px 0; letter-spacing: -0.02em; }
   .subtitle { color: #64748b; font-size: 15px; margin: 0; }
   .btn-back {
@@ -329,18 +445,18 @@
 
   /* LAYOUT */
   .grid-layout { display: grid; grid-template-columns: 1fr; gap: 24px; }
-  @media (min-width: 900px) { .grid-layout { grid-template-columns: 2fr 1fr; } }
+  @media (min-width: 900px) { .grid-layout { grid-template-columns: 1fr 1fr; gap: 16px; } }
 
   /* CARDS */
   .card {
     background: white; border-radius: 20px; border: 1px solid #e2e8f0;
     box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); overflow: hidden;
   }
-  .card-header { padding: 20px 24px; }
+  .card-header { padding: 12px 16px; }
   .card-header h3 { margin: 0; font-size: 18px; font-weight: 600; color: #1e293b; }
   .card-header h4 { margin: 0; font-size: 16px; font-weight: 600; color: #334155; }
   .border-b { border-bottom: 1px solid #f1f5f9; }
-  .card-body { padding: 24px; }
+  .card-body { padding: 16px; }
 
   /* DETAIL CARD STYLES */
   .header-top { display: flex; gap: 10px; margin-bottom: 12px; }
@@ -350,13 +466,18 @@
   .status-badge { padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 600; text-transform: capitalize; border: 1px solid transparent; }
   .priority-badge { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; border: 1px solid transparent; }
 
-  .meta-grid { display: flex; gap: 24px; margin-bottom: 24px; }
+  .meta-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 20px; }
+  @media (min-width: 640px) { .meta-grid { grid-template-columns: repeat(4, 1fr); } }
   .meta-item .label { font-size: 11px; text-transform: uppercase; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px; }
   .meta-item .value { font-size: 14px; font-weight: 600; color: #334155; }
 
-  .description-box { background: #f8fafc; border: 1px solid #f1f5f9; padding: 20px; border-radius: 12px; }
+  .description-box { background: #f8fafc; border: 1px solid #f1f5f9; padding: 12px; border-radius: 12px; }
   .desc-label { font-size: 13px; font-weight: 600; color: #334155; margin: 0 0 8px 0; text-transform: uppercase; }
   .desc-text { font-size: 15px; line-height: 1.6; color: #475569; margin: 0; white-space: pre-wrap; }
+  .submission-box { margin-top: 16px; border: 1px dashed #e2e8f0; padding: 14px; border-radius: 12px; background: #f8fafc; }
+  .links-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .link-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: #eef2ff; color: #4338ca; text-decoration: none; font-weight: 600; font-size: 12px; }
+  .notes-box { margin-top: 10px; background: #fff7ed; border: 1px solid #fed7aa; color: #c2410c; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
 
   .grade-box { margin-top: 24px; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 20px; border-radius: 12px; text-align: center; }
   .grade-label { font-size: 12px; font-weight: 600; color: #065f46; text-transform: uppercase; }

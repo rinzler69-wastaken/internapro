@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 	"time"
 
@@ -134,7 +135,7 @@ func (h *DashboardHandler) GetInternDashboard(w http.ResponseWriter, r *http.Req
 		var attStatus sql.NullString
 
 		h.db.QueryRow(`
-			SELECT status FROM attendances WHERE intern_id = ? AND date = ?`, internID, dayDate).Scan(&attStatus)
+			SELECT attendance.status FROM attendances WHERE intern_id = ? AND date = ?`, internID, dayDate).Scan(&attStatus)
 
 		status := "absent"
 		if attStatus.Valid {
@@ -321,7 +322,8 @@ func (h *DashboardHandler) GetAdminDashboard(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if claims.Role == "intern" {
+	role := normalizeRole(claims.Role)
+	if role == "intern" {
 		utils.RespondForbidden(w, "Access denied")
 		return
 	}
@@ -330,100 +332,148 @@ func (h *DashboardHandler) GetAdminDashboard(w http.ResponseWriter, r *http.Requ
 
 	// 1. Total Interns
 	var totalInterns int
-	h.db.QueryRow("SELECT COUNT(*) FROM interns WHERE status = 'active'").Scan(&totalInterns)
+	intQuery := "SELECT COUNT(*) FROM interns i WHERE i.status = 'active'"
+	intArgs := []interface{}{}
+	if role == "pembimbing" {
+		intQuery += " AND i.supervisor_id = ?"
+		intArgs = append(intArgs, claims.UserID)
+	}
+	h.db.QueryRow(intQuery, intArgs...).Scan(&totalInterns)
 
 	// 2. Total Tasks
 	var totalTasks int
-	h.db.QueryRow("SELECT COUNT(*) FROM task_assignments").Scan(&totalTasks)
+	taskCountQuery := "SELECT COUNT(*) FROM tasks t LEFT JOIN interns i ON t.intern_id = i.id"
+	taskCountArgs := []interface{}{}
+	if role == "pembimbing" {
+		taskCountQuery += " WHERE i.supervisor_id = ?"
+		taskCountArgs = append(taskCountArgs, claims.UserID)
+	}
+	if err := h.db.QueryRow(taskCountQuery, taskCountArgs...).Scan(&totalTasks); err != nil {
+		log.Printf("admin dashboard total tasks query failed: %v", err)
+	}
 
-	// 3. Task Completion Stats
-	var completedOnTime, completedLate, pendingTasks int
-	h.db.QueryRow(`
+	// 3. Task Completion Stats (include overdue & in-progress for dashboard pie chart)
+	var completedOnTime, completedLate, pendingTasks, overdueTasks, inProgressTasks int
+	taskStatsQuery := `
 		SELECT 
-			SUM(CASE WHEN status = 'completed' AND is_late = 0 THEN 1 ELSE 0 END) as on_time,
-			SUM(CASE WHEN status = 'completed' AND is_late = 1 THEN 1 ELSE 0 END) as late,
-			SUM(CASE WHEN status IN ('pending', 'in_progress', 'submitted') THEN 1 ELSE 0 END) as pending
-		FROM task_assignments`).Scan(&completedOnTime, &completedLate, &pendingTasks)
+			SUM(CASE WHEN t.status = 'completed' AND t.is_late = 0 THEN 1 ELSE 0 END) as on_time,
+			SUM(CASE WHEN t.status = 'completed' AND t.is_late = 1 THEN 1 ELSE 0 END) as late,
+			SUM(CASE WHEN t.status IN ('pending', 'in_progress', 'submitted', 'revision') THEN 1 ELSE 0 END) as pending,
+			SUM(CASE WHEN t.status != 'completed' AND t.is_late = 1 THEN 1 ELSE 0 END) as overdue,
+			SUM(CASE WHEN t.status != 'completed' AND t.is_late = 0 THEN 1 ELSE 0 END) as in_progress
+		FROM tasks t
+		LEFT JOIN interns i ON t.intern_id = i.id
+	`
+	taskStatsArgs := []interface{}{}
+	if role == "pembimbing" {
+		taskStatsQuery += " WHERE i.supervisor_id = ?"
+		taskStatsArgs = append(taskStatsArgs, claims.UserID)
+	}
+	if err := h.db.QueryRow(taskStatsQuery, taskStatsArgs...).Scan(&completedOnTime, &completedLate, &pendingTasks, &overdueTasks, &inProgressTasks); err != nil {
+		log.Printf("admin dashboard task stats query failed: %v", err)
+	}
 
 	// 4. Today's Attendance
 	today := now.Format("2006-01-02")
 	var presentToday, totalToday int
-	h.db.QueryRow(`
+	attTodayQuery := `
 		SELECT 
-			COUNT(CASE WHEN status IN ('present', 'late') THEN 1 END) as present,
+			COUNT(CASE WHEN a.status IN ('present', 'late') THEN 1 END) as present,
 			COUNT(*) as total
-		FROM attendances WHERE date = ?`, today).Scan(&presentToday, &totalToday)
+		FROM attendances a
+		JOIN interns i ON a.intern_id = i.id
+		WHERE a.date = ?`
+	attTodayArgs := []interface{}{today}
+	if role == "pembimbing" {
+		attTodayQuery += " AND i.supervisor_id = ?"
+		attTodayArgs = append(attTodayArgs, claims.UserID)
+	}
+	h.db.QueryRow(attTodayQuery, attTodayArgs...).Scan(&presentToday, &totalToday)
 
 	// 5. Recent Tasks
-	tasksRows, err := h.db.Query(`
-		SELECT ta.id, ta.title, ta.status, ta.deadline, ta.is_late, u.name as intern_name
-		FROM task_assignments ta
-		JOIN interns i ON ta.intern_id = i.id
-		JOIN users u ON i.user_id = u.id
-		ORDER BY ta.created_at DESC LIMIT 5`)
-	if err != nil {
-		utils.RespondInternalError(w, "Failed to fetch tasks")
-		return
-	}
-	defer tasksRows.Close()
-
 	var recentTasks []map[string]interface{}
-	for tasksRows.Next() {
-		var t struct {
-			ID         sql.NullInt64
-			Title      sql.NullString
-			Status     sql.NullString
-			Deadline   sql.NullTime
-			IsLate     sql.NullBool
-			InternName sql.NullString
-		}
-		tasksRows.Scan(&t.ID, &t.Title, &t.Status, &t.Deadline, &t.IsLate, &t.InternName)
+	tasksQuery := `
+		SELECT t.id, t.title, t.status, t.is_late, u.name as intern_name
+		FROM tasks t
+		LEFT JOIN interns i ON t.intern_id = i.id
+		LEFT JOIN users u ON i.user_id = u.id
+	`
+	taskArgs := []interface{}{}
+	if role == "pembimbing" {
+		tasksQuery += " WHERE i.supervisor_id = ?"
+		taskArgs = append(taskArgs, claims.UserID)
+	}
+	tasksQuery += " ORDER BY t.created_at DESC LIMIT 5"
 
-		recentTasks = append(recentTasks, map[string]interface{}{
-			"id":          int(t.ID.Int64),
-			"title":       t.Title.String,
-			"status":      t.Status.String,
-			"intern_name": t.InternName.String,
-			"is_late":     t.IsLate.Bool,
-		})
+	tasksRows, err := h.db.Query(tasksQuery, taskArgs...)
+	if err != nil {
+		log.Printf("admin dashboard recent tasks query failed: %v", err)
+	} else {
+		defer tasksRows.Close()
+		for tasksRows.Next() {
+			var t struct {
+				ID         sql.NullInt64
+				Title      sql.NullString
+				Status     sql.NullString
+				IsLate     sql.NullBool
+				InternName sql.NullString
+			}
+			tasksRows.Scan(&t.ID, &t.Title, &t.Status, &t.IsLate, &t.InternName)
+
+			recentTasks = append(recentTasks, map[string]interface{}{
+				"id":          int(t.ID.Int64),
+				"title":       t.Title.String,
+				"status":      t.Status.String,
+				"intern_name": t.InternName.String,
+				"is_late":     t.IsLate.Bool,
+			})
+		}
 	}
 
 	// 6. Today's Attendance Records
-	attendanceRows, err := h.db.Query(`
+	attListQuery := `
 		SELECT a.id, a.status, a.check_in_time, u.name, a.distance_meters
 		FROM attendances a
 		JOIN interns i ON a.intern_id = i.id
 		JOIN users u ON i.user_id = u.id
-		WHERE a.date = ?
-		ORDER BY a.created_at DESC`, today)
-	if err != nil {
-		utils.RespondInternalError(w, "Failed to fetch attendance")
-		return
+		WHERE a.date = ?`
+	attListArgs := []interface{}{today}
+	if role == "pembimbing" {
+		attListQuery += " AND i.supervisor_id = ?"
+		attListArgs = append(attListArgs, claims.UserID)
 	}
-	defer attendanceRows.Close()
+	attListQuery += " ORDER BY a.created_at DESC"
+
+	attendanceRows, err := h.db.Query(attListQuery, attListArgs...)
+	if err != nil {
+		log.Printf("admin dashboard attendance query failed: %v", err)
+	}
 
 	var todayAttendance []map[string]interface{}
-	for attendanceRows.Next() {
-		var a struct {
-			ID             sql.NullInt64
-			Status         sql.NullString
-			CheckInTime    sql.NullTime
-			InternName     sql.NullString
-			DistanceMeters sql.NullInt64
-		}
-		attendanceRows.Scan(&a.ID, &a.Status, &a.CheckInTime, &a.InternName, &a.DistanceMeters)
+	if err == nil {
+		defer attendanceRows.Close()
+		for attendanceRows.Next() {
+			var a struct {
+				ID             sql.NullInt64
+				Status         sql.NullString
+				CheckInTime    sql.NullTime
+				InternName     sql.NullString
+				DistanceMeters sql.NullInt64
+			}
+			attendanceRows.Scan(&a.ID, &a.Status, &a.CheckInTime, &a.InternName, &a.DistanceMeters)
 
-		att := map[string]interface{}{
-			"intern_name": a.InternName.String,
-			"status":      a.Status.String,
+			att := map[string]interface{}{
+				"intern_name": a.InternName.String,
+				"status":      a.Status.String,
+			}
+			if a.CheckInTime.Valid {
+				att["check_in_time"] = a.CheckInTime.Time.Format("15:04")
+			}
+			if a.DistanceMeters.Valid {
+				att["distance"] = int(a.DistanceMeters.Int64)
+			}
+			todayAttendance = append(todayAttendance, att)
 		}
-		if a.CheckInTime.Valid {
-			att["check_in_time"] = a.CheckInTime.Time.Format("15:04")
-		}
-		if a.DistanceMeters.Valid {
-			att["distance"] = int(a.DistanceMeters.Int64)
-		}
-		todayAttendance = append(todayAttendance, att)
 	}
 
 	// 7. Weekly Attendance Trend
@@ -433,11 +483,19 @@ func (h *DashboardHandler) GetAdminDashboard(w http.ResponseWriter, r *http.Requ
 	for i := 0; i < 7; i++ {
 		date := weekStart.AddDate(0, 0, i).Format("2006-01-02")
 		var present, absent int
-		h.db.QueryRow(`
+		weekQuery := `
 			SELECT 
-				COUNT(CASE WHEN status IN ('present', 'late') THEN 1 END) as present,
-				COUNT(CASE WHEN status NOT IN ('present', 'late', 'sick', 'permission') THEN 1 END) as absent
-			FROM attendances WHERE date = ?`, date).Scan(&present, &absent)
+				COUNT(CASE WHEN a.status IN ('present', 'late') THEN 1 END) as present,
+				COUNT(CASE WHEN a.status NOT IN ('present', 'late', 'sick', 'permission') THEN 1 END) as absent
+			FROM attendances a
+			JOIN interns i ON a.intern_id = i.id
+			WHERE a.date = ?`
+		weekArgs := []interface{}{date}
+		if role == "pembimbing" {
+			weekQuery += " AND i.supervisor_id = ?"
+			weekArgs = append(weekArgs, claims.UserID)
+		}
+		h.db.QueryRow(weekQuery, weekArgs...).Scan(&present, &absent)
 
 		dayName := weekStart.AddDate(0, 0, i).Format("Mon")
 		weeklyTrend = append(weeklyTrend, map[string]interface{}{
@@ -455,6 +513,8 @@ func (h *DashboardHandler) GetAdminDashboard(w http.ResponseWriter, r *http.Requ
 			"completed_on_time": completedOnTime,
 			"completed_late":    completedLate,
 			"pending_tasks":     pendingTasks,
+			"overdue_tasks":     overdueTasks,
+			"in_progress_tasks": inProgressTasks,
 			"present_today":     presentToday,
 			"total_today":       totalToday,
 		},

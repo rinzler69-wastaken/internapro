@@ -372,10 +372,10 @@
                             <th>Waktu Masuk</th>
                             <th>Waktu Keluar</th>
                             <th>Status</th>
-                            <th>Aksi</th>
                             {#if auth.user?.role !== 'intern'}
                                 <th>Intern</th>
                             {/if}
+                            <th>Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -433,6 +433,14 @@
                     </div>
                     <span class={`status-badge equal-badge ${badge.cls}`}>{badge.text}</span>
                   </div>
+                  {#if auth.user?.role !== 'intern'}
+                    <div class="intern-grid">
+                      <div class="intern-box">
+                      <div class="avatar-mini">{r.intern_name?.charAt(0) || 'U'}</div>
+                      <span class="intern-box-label">{r.intern_name || '-'}</span>
+                    </div>
+                    </div>
+                  {/if}
                   <div class="time-grid">
                     <div class="time-box">
                       <p class="label">Presensi Masuk</p>
@@ -620,6 +628,8 @@
     color: #0f172a;
   }
 
+
+
   /* .page-bg {
     min-height: 100vh;
     background-color: #f8fafc;
@@ -654,7 +664,7 @@
   .card-header {
     padding-bottom: 20px; display: flex; justify-content: space-between; align-items: center;
   }
-  .card-header h3 { margin: 0; font-size: 20px; font-weight: 700; color: #1e293b; }
+  .card-header h3 { margin: 0; font-size: 20px; font-weight: 600; color: #1e293b; }
   .border-b { border-bottom: 1px solid #f1f5f9; }
 
   /* Main Action Card */
@@ -788,6 +798,33 @@
     background:#f8fafc;
     text-align:center;
   }
+
+    .intern-grid { display:grid; gap:10px; margin-bottom:12px; }
+
+
+    .intern-box {
+    padding:12px;
+    border:1px solid #e2e8f0;
+    border-radius:14px;
+    background:#f8fafc;
+    text-align:center;
+  }
+
+    .intern-name-mobile {
+    font-weight: 600;
+    color: #334155;
+  }
+  
+    .intern-box-label {
+    margin:6px;
+    font-size:18px;
+    font-weight:700;
+    padding-bottom: 20px;
+    color:#0f172a;
+    align-items: center;
+    justify-content:center;
+  }
+
   .time-box .label { margin:0; font-size:12px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.03em; }
   .time-value { margin:6px 0 0 0; font-size:18px; font-weight:800; color:#0f172a; letter-spacing:-0.02em; }
   .mobile-actions { display:flex; gap:8px; }

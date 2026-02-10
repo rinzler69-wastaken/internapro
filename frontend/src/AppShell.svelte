@@ -8,6 +8,7 @@
   import Dashboard from './pages/Dashboard.svelte';
   import RegisterIntern from './pages/RegisterIntern.svelte';
   import Tasks from './pages/Tasks.svelte';
+  import TaskEdit from './pages/TaskEdit.svelte';
   import TaskDetail from './pages/TaskDetail.svelte';
   import TaskCreate from './pages/TaskCreate.svelte';
   import TaskAssignments from './pages/TaskAssignments.svelte';
@@ -26,6 +27,7 @@
   import NotFound from './pages/NotFound.svelte';
     import ProfileEdit from './pages/ProfileEdit.svelte';
   import WaitingApproval from './pages/WaitingApproval.svelte';
+  import Forbidden from './pages/Forbidden.svelte';
 
   // NOTE: this router picks the *last* matching route,
   // so order from broad -> specific.
@@ -50,6 +52,8 @@
     { path: '/profile', component: Profile },
     { path: '/profile/edit', component: ProfileEdit },
     { path: '/calendar', component: Calendar },
+    { path: '/forbidden', component: Forbidden },
+    { path: /^\/tasks\/edit\/(?<id>[^/]+)$/, component: TaskEdit },
   ];
 
   onMount(async () => {
@@ -89,6 +93,11 @@
 
     if (!auth.isLoading && auth.isAuthenticated) {
       const path = window.location.pathname;
+      const role = auth.user?.role || '';
+      if (path.startsWith('/settings') && role !== 'admin') {
+        replace('/forbidden');
+        return;
+      }
       if (!path || path === '/dashboard') return;
       if (path === '/') {
         replace('/dashboard');
@@ -111,6 +120,7 @@
         '/calendar',
         '/waiting-approval',
         '/register-intern',
+        '/forbidden',
       ];
       const isKnown =
         known.some((p) => path === p || path.startsWith(`${p}/`)) ||

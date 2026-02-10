@@ -105,7 +105,7 @@
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 40;
+    z-index: auto;
     /* animation: fadeIn 0.25s ease; */
   }
 </style>
@@ -162,6 +162,12 @@
         <span>Anggota Magang</span>
       </a>
     {/if}
+    {#if role === 'admin'}
+      <a href="/supervisors" use:route onclick={closeMobileSidebar} class={`nav-link ${path.startsWith('/supervisors') ? 'active' : ''}`} data-tooltip="Pembimbing">
+        <span class="nav-icon material-symbols-outlined" aria-hidden="true">supervisor_account</span>
+        <span>Pembimbing</span>
+      </a>
+    {/if}
     <a href="/tasks" use:route onclick={closeMobileSidebar} class={`nav-link ${path.startsWith('/tasks') ? 'active' : ''}`} data-tooltip="Penugasan">
       <span class="nav-icon material-symbols-outlined" aria-hidden="true">assignment</span>
       <span>Daftar Penugasan</span>
@@ -212,10 +218,10 @@
       </span>
       <span class="section-title-text">Aktivitas</span>
     </div>
-    <a href="/notifications" use:route onclick={closeMobileSidebar} class={`nav-link ${path.startsWith('/notifications') ? 'active' : ''}`} data-tooltip="Notifikasi">
+    <!-- <a href="/notifications" use:route onclick={closeMobileSidebar} class={`nav-link ${path.startsWith('/notifications') ? 'active' : ''}`} data-tooltip="Notifikasi">
       <span class="nav-icon material-symbols-outlined" aria-hidden="true">notifications</span>
       <span>Notifikasi</span>
-    </a>
+    </a> -->
     <a href="/profile" use:route onclick={closeMobileSidebar} class={`nav-link ${path.startsWith('/profile') ? 'active' : ''}`} data-tooltip="Profil">
       <span class="nav-icon material-symbols-outlined" aria-hidden="true">person</span>
       <span>Profil</span>
@@ -232,10 +238,6 @@
         </span>
         <span class="section-title-text">Sistem</span>
       </div>
-      <a href="/supervisors" use:route onclick={closeMobileSidebar} class={`nav-link ${path.startsWith('/supervisors') ? 'active' : ''}`} data-tooltip="Pembimbing">
-        <span class="nav-icon material-symbols-outlined" aria-hidden="true">supervisor_account</span>
-        <span>Pembimbing</span>
-      </a>
       <a href="/settings" use:route onclick={closeMobileSidebar} class={`nav-link ${path.startsWith('/settings') ? 'active' : ''}`} data-tooltip="Pengaturan">
         <span class="nav-icon material-symbols-outlined" aria-hidden="true">settings</span>
         <span>Pengaturan</span>

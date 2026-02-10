@@ -40,7 +40,8 @@ func (h *NotificationHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 
 	var total int64
 	if err := h.db.QueryRow("SELECT COUNT(*) FROM notifications WHERE user_id = ?", claims.UserID).Scan(&total); err != nil {
-		utils.RespondInternalError(w, "Failed to count notifications")
+		// Fail-soft: return empty list instead of 500 so UI keeps working
+		utils.RespondPaginated(w, []models.Notification{}, utils.CalculatePagination(page, limit, 0))
 		return
 	}
 
@@ -53,7 +54,7 @@ func (h *NotificationHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		claims.UserID, limit, offset,
 	)
 	if err != nil {
-		utils.RespondInternalError(w, "Failed to fetch notifications")
+		utils.RespondPaginated(w, []models.Notification{}, utils.CalculatePagination(page, limit, 0))
 		return
 	}
 	defer rows.Close()

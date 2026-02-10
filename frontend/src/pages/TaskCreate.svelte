@@ -1,6 +1,7 @@
 <script>
   import { api } from '../lib/api.js';
   import { goto } from '@mateothegreat/svelte5-router';
+  import { onMount } from 'svelte';
 
   // State
   let title = $state('');
@@ -10,6 +11,7 @@
   let deadline = $state('');
   let deadlineTime = $state('');
   let assignTo = $state('all');
+  let submissionMethod = $state('links');
   
   // Search & Selection State
   let searchQuery = $state('');
@@ -58,6 +60,7 @@
         deadline,
         deadline_time: deadlineTime,
         assign_to: assignTo,
+        submission_method: submissionMethod,
         intern_ids: selected.map((i) => i.id),
       });
       goto('/tasks');
@@ -67,6 +70,12 @@
       loading = false;
     }
   }
+
+  onMount(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (!startDate) startDate = today;
+    if (!deadlineTime) deadlineTime = '23:59';
+  });
 </script>
 
 <div class="page-bg">
@@ -114,6 +123,17 @@
                                 <option value="low">Low (Rendah)</option>
                                 <option value="medium">Medium (Sedang)</option>
                                 <option value="high">High (Tinggi)</option>
+                            </select>
+                            <div class="select-arrow">▼</div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="label" for="submissionMethod">Metode Pengumpulan</label>
+                        <div class="select-wrapper">
+                            <select class="input-field select" bind:value={submissionMethod} id="submissionMethod">
+                                <option value="links">Hanya Link</option>
+                                <option value="files">Hanya File</option>
+                                <option value="both">Link & File</option>
                             </select>
                             <div class="select-arrow">▼</div>
                         </div>

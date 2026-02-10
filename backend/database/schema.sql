@@ -95,20 +95,27 @@ CREATE TABLE interns (
 -- Task assignments (bulk assignment)
 CREATE TABLE task_assignments (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    intern_id BIGINT NULL, -- optional single-intern assignment (used by dashboard queries)
     title VARCHAR(255) NOT NULL,
     description TEXT,
     assigned_by BIGINT NOT NULL, -- user_id (admin/pembimbing)
     priority ENUM('low', 'medium', 'high') DEFAULT 'medium',
+    status ENUM('pending', 'scheduled', 'in_progress', 'submitted', 'revision', 'completed', 'overdue') DEFAULT 'pending',
     start_date DATE,
     deadline DATE,
     deadline_time TIME,
+    submitted_at DATETIME,
+    is_late BOOLEAN DEFAULT FALSE,
+    grade INT,
     assign_to_all BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (intern_id) REFERENCES interns(id) ON DELETE CASCADE,
     INDEX idx_assigned_by (assigned_by),
     INDEX idx_priority (priority),
-    INDEX idx_deadline (deadline)
+    INDEX idx_deadline (deadline),
+    INDEX idx_intern_status (intern_id, status)
 ) ENGINE=InnoDB;
 
 CREATE TABLE task_assignment_interns (

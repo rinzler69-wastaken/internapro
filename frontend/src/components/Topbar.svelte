@@ -21,6 +21,7 @@
     { match: '/supervisors', label: 'Pembimbing' },
     { match: '/data-tools', label: 'Export/Import' },
     { match: '/profile', label: 'Profil' },
+    { match: '/profile/edit', label: 'Edit Profil' },
     { match: '/calendar', label: 'Kalender' },
   ];
 
@@ -29,6 +30,9 @@
     titles.find((t) => path === t.match || path.startsWith(t.match + '/'))?.label || 'Dashboard'
   );
   const role = $derived(auth.user?.role || 'intern');
+  const settingsHref = $derived(
+    role === 'intern' || role === 'supervisor' || role === 'pembimbing' ? '/profile/edit' : '/settings'
+  );
   const displayName = $derived(auth.user?.name || auth.user?.email || 'Anda');
   const avatarSrc = $derived(buildAvatarUrl(auth.user?.avatar));
 
@@ -74,6 +78,9 @@
     }
     if (routePath.startsWith('/profile')) {
       return 'Perbarui informasi akun dan keamanan.';
+    }
+    if (routePath.startsWith('/profile/edit')) {
+      return `Perbarui informasi pribadi dan preferensi, ${name}.`;
     }
     if (routePath.startsWith('/calendar')) {
       return 'Ringkasan jadwal tugas dan presensi.';
@@ -215,7 +222,7 @@
     right: 0;
     
     background-color: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(8px);
+    /* backdrop-filter: blur(8px); */
     
     /* Add border-bottom to align with sidebar separator */
     border-bottom: 1px solid rgba(229, 231, 235, 1);
@@ -308,7 +315,7 @@
   <div class="topbar-actions">
     <!-- Notification Bell -->
     <div class="dropdown-container">
-      <button 
+      <!-- <button 
         id="notif-dropdown-btn"
         class="notif-btn" 
         onclick={toggleNotifDropdown}
@@ -318,9 +325,9 @@
         {#if unreadCount > 0}
           <span class="notif-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
         {/if}
-      </button>
+      </button> -->
       
-      {#if notifDropdownOpen}
+      <!-- {#if notifDropdownOpen}
         <div id="notif-dropdown-menu" class="dropdown-menu notif-dropdown">
           <div class="dropdown-header">
             <span class="dropdown-title">Notifikasi</span>
@@ -355,7 +362,7 @@
             Lihat Semua
           </a>
         </div>
-      {/if}
+      {/if} -->
     </div>
 
     <!-- User Menu -->
@@ -387,7 +394,7 @@
             <span class="material-symbols-outlined">person</span>
             <span>Profil Saya</span>
           </a>
-          <a href="/settings" class="dropdown-item">
+          <a href={settingsHref} class="dropdown-item">
             <span class="material-symbols-outlined">settings</span>
             <span>Pengaturan</span>
           </a>

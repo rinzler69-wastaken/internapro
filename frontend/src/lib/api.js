@@ -17,11 +17,6 @@ async function request(endpoint, options = {}) {
 
   const res = await fetch(`${API_BASE}${endpoint}`, config);
 
-  if (res.status === 401) {
-    auth.logout();
-    return { success: false, error: 'Unauthorized' };
-  }
-
   if (res.status === 204) return { success: true };
 
   const contentType = res.headers.get('content-type') || '';
@@ -31,6 +26,14 @@ async function request(endpoint, options = {}) {
   } else {
     const text = await res.text();
     data = text ? { message: text } : null;
+  }
+
+  // For login endpoint, let caller handle 401 so we can show proper message
+  if (res.status === 401) {
+    if (!endpoint.startsWith('/auth/login')) {
+      auth.logout();
+    }
+    throw new Error(data?.error || data?.message || 'Unauthorized');
   }
 
   if (!res.ok) throw new Error(data?.error || data?.message || `Request failed (${res.status})`);
@@ -140,7 +143,7 @@ export const api = {
   
   // Dashboard Statistic
   async getAdminDashboard() {
-    return request('/admin/dashboard'); 
+    return request('/dashboard/admin'); 
   },
   
   async updateInternStatus(id, status) {
@@ -195,22 +198,22 @@ export const api = {
   // ==========================================
   async getSupervisors(params = {}) {
     const query = new URLSearchParams(params).toString();
-    return request(`/supervisors${query ? `?${query}` : ''}`);
+    return request(`/admin/supervisors${query ? `?${query}` : ''}`);
   },
   async createSupervisor(payload) {
-    return request('/supervisors', { method: 'POST', body: JSON.stringify(payload) });
+    return request('/admin/supervisors', { method: 'POST', body: JSON.stringify(payload) });
   },
   async updateSupervisor(id, payload) {
-    return request(`/supervisors/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    return request(`/admin/supervisors/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   },
   async deleteSupervisor(id) {
-    return request(`/supervisors/${id}`, { method: 'DELETE' });
+    return request(`/admin/supervisors/${id}`, { method: 'DELETE' });
   },
   async approveSupervisor(id) {
-    return request(`/supervisors/${id}/approve`, { method: 'POST' });
+    return request(`/admin/supervisors/${id}/approve`, { method: 'POST' });
   },
   async rejectSupervisor(id) {
-    return request(`/supervisors/${id}/reject`, { method: 'POST' });
+    return request(`/admin/supervisors/${id}/reject`, { method: 'POST' });
   },
 
   // ==========================================

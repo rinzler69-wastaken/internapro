@@ -6,12 +6,16 @@
   // State
   let assignments = $state([]);
   let loading = $state(true);
+  let search = $state('');
+  let priority = $state('');
+  let pagination = $state({ page: 1, total_pages: 1 });
 
   async function fetchAssignments() {
     loading = true;
     try {
-      const res = await api.getTaskAssignments({ page: 1, limit: 20 });
+      const res = await api.getTaskAssignments({ page: pagination.page || 1, limit: 10, search, priority });
       assignments = res.data || [];
+      pagination = res.pagination || { page: 1, total_pages: 1 };
     } catch (err) {
       console.error(err);
     } finally {
@@ -34,6 +38,15 @@
     if (percent >= 50) return 'bg-blue-500';
     if (percent > 0) return 'bg-amber-500';
     return 'bg-slate-300';
+  }
+
+  function setPage(p) {
+    if (!pagination.total_pages) return;
+    const target = Math.min(Math.max(1, p), pagination.total_pages);
+    if (target !== pagination.page) {
+      pagination = { ...pagination, page: target };
+      fetchAssignments();
+    }
   }
 
   onMount(fetchAssignments);
@@ -64,6 +77,21 @@
         <div class="card-header border-b">
             <h3>Semua Tugas</h3>
             <span class="badge-count">{assignments.length} Tugas</span>
+        </div>
+
+        <div class="filters">
+          <div class="filter-item">
+            <input class="input-field" placeholder="Cari judul..." bind:value={search} onkeydown={(e) => e.key==='Enter' && fetchAssignments()} />
+          </div>
+          <div class="filter-item">
+            <select class="input-field select" bind:value={priority}>
+              <option value="">Semua Prioritas</option>
+              <option value="high">Tinggi</option>
+              <option value="medium">Sedang</option>
+              <option value="low">Rendah</option>
+            </select>
+          </div>
+          <button class="btn-outline" onclick={fetchAssignments}>Terapkan</button>
         </div>
 
         {#if loading}
@@ -128,6 +156,14 @@
                     </tbody>
                 </table>
             </div>
+
+            {#if pagination.total_pages > 1}
+              <div class="pagination">
+                <button class="btn-outline" onclick={() => setPage((pagination.page || 1)-1)} disabled={(pagination.page || 1) <= 1}>‹ Prev</button>
+                <span class="page-label">Halaman {pagination.page || 1} / {pagination.total_pages}</span>
+                <button class="btn-outline" onclick={() => setPage((pagination.page || 1)+1)} disabled={(pagination.page || 1) >= pagination.total_pages}>Next ›</button>
+              </div>
+            {/if}
         {/if}
     </div>
 
@@ -173,6 +209,10 @@
   .border-b { border-bottom: 1px solid #f1f5f9; }
   
   .badge-count { background: #f1f5f9; color: #64748b; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+
+  .filters { display: flex; gap: 12px; padding: 16px 20px; flex-wrap: wrap; align-items: center; }
+  .filter-item { flex: 1; min-width: 200px; }
+  .select { appearance: none; cursor: pointer; }
 
   /* --- TABLE --- */
   .table-container { overflow-x: auto; }
@@ -234,6 +274,9 @@
   .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.5; }
   .spinner { width: 32px; height: 32px; border: 3px solid #e2e8f0; border-top-color: #10b981; border-radius: 50%; margin: 0 auto 16px; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  .pagination { display: flex; gap: 12px; justify-content: center; align-items: center; padding: 16px; }
+  .page-label { color: #475569; font-weight: 600; font-size: 13px; }
 
   /* Animation */
   .animate-fade-in { opacity: 0; animation: fadeIn 0.6s ease-out forwards; }

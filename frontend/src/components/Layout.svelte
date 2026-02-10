@@ -38,6 +38,14 @@
     min-height: 100vh;
   }
 
+#overlay-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647; /* max 32-bit z-index */
+  pointer-events: none; /* enabled by portal action when a modal is mounted */
+}
+
+
   .main-content {
     /* Space for fixed topbar at the top */
     padding-top: 108px;
@@ -75,3 +83,5 @@
     {@render children?.()}
   </main>
 </div>
+
+<div id="overlay-root"></div>
