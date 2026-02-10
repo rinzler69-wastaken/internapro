@@ -18,8 +18,7 @@ export DB_NAME="${DB_NAME:-${MYSQLDATABASE:-interna_db}}"
 # 3. Ensure your persistent volume directories exist
 # If UPLOAD_DIR is /app/uploads, this creates the folders on your Volume
 echo "==> Ensuring upload directories exist at $UPLOAD_DIR"
-mkdir -p "$UPLOAD_DIR/tasks" "$UPLOAD_DIR/leaves"
-
+export UPLOAD_DIR="${UPLOAD_DIR:-${ROOT}/uploads}"
 # 4. Launching server
 # We skip building here because we'll do that in the 'Build Command' stage
 echo "==> Launching server on port $SERVER_PORT"
