@@ -71,14 +71,14 @@ export const api = {
   async post(endpoint, body) {
     return request(endpoint, {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: body instanceof FormData ? body : JSON.stringify(body),
     });
   },
 
   async put(endpoint, body) {
     return request(endpoint, {
       method: 'PUT',
-      body: JSON.stringify(body),
+      body: body instanceof FormData ? body : JSON.stringify(body),
     });
   },
 
@@ -89,7 +89,7 @@ export const api = {
   async patch(endpoint, body) {
     return request(endpoint, {
       method: 'PATCH',
-      body: JSON.stringify(body),
+      body: body instanceof FormData ? body : JSON.stringify(body),
     });
   },
 
@@ -140,16 +140,16 @@ export const api = {
   // ==========================================
   // ADMIN & INTERN MANAGEMENT
   // ==========================================
-  
+
   // Dashboard Statistic
   async getAdminDashboard() {
-    return request('/dashboard/admin'); 
+    return request('/dashboard/admin');
   },
-  
+
   async updateInternStatus(id, status) {
-    return request(`/interns/${id}`, { 
-        method: 'PUT', 
-        body: JSON.stringify({ status }) 
+    return request(`/interns/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status })
     });
   },
 
@@ -159,7 +159,7 @@ export const api = {
   async getInterns(params = {}) {
     const searchParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) searchParams.append(key, String(value));
+      if (value !== undefined && value !== null) searchParams.append(key, String(value));
     });
     const query = searchParams.toString();
     return request(`/interns${query ? `?${query}` : ''}`);
@@ -222,25 +222,25 @@ export const api = {
   async getTasks(arg1, arg2) {
     let params = {};
     if (arg1 && typeof arg1 === 'object') {
-        params = { ...arg1 };
+      params = { ...arg1 };
     } else {
-        if (arg1) params.intern_id = arg1; 
-        params.page = arg2 || 1;
+      if (arg1) params.intern_id = arg1;
+      params.page = arg2 || 1;
     }
-    
+
     const searchParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
-        if (value !== null && value !== undefined) {
-            searchParams.append(key, String(value));
-        }
+      if (value !== null && value !== undefined) {
+        searchParams.append(key, String(value));
+      }
     });
-    
+
     const query = searchParams.toString();
 
     if (params.intern_id) {
-        return request(`/tasks/intern/${params.intern_id}?page=${params.page || 1}`);
+      return request(`/tasks/intern/${params.intern_id}?page=${params.page || 1}`);
     }
-    
+
     return request(`/tasks${query ? `?${query}` : ''}`);
   },
 
@@ -257,7 +257,10 @@ export const api = {
     return request(`/tasks/${id}`, { method: 'DELETE' });
   },
   async submitTask(id, payload) {
-    return request(`/tasks/${id}/submit`, { method: 'POST', body: JSON.stringify(payload) });
+    return request(`/tasks/${id}/submit`, {
+      method: 'POST',
+      body: payload instanceof FormData ? payload : JSON.stringify(payload)
+    });
   },
   async reviewTask(id, payload) {
     return request(`/tasks/${id}/review`, { method: 'POST', body: JSON.stringify(payload) });
@@ -325,6 +328,9 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return request(`/attendance/intern/${id}${query ? `?${query}` : ''}`);
   },
+  async deleteAttendance(id) {
+    return request(`/attendance/${id}`, { method: 'DELETE' });
+  },
 
   // ==========================================
   // LEAVES
@@ -350,6 +356,9 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return request(`/assessments${query ? `?${query}` : ''}`);
   },
+  async getAssessment(id) {
+    return request(`/assessments/${id}`);
+  },
   async createAssessment(payload) {
     return request('/assessments', { method: 'POST', body: JSON.stringify(payload) });
   },
@@ -367,14 +376,26 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return request(`/reports${query ? `?${query}` : ''}`);
   },
+  async getReport(id) {
+    return request(`/reports/${id}`);
+  },
   async createReport(payload) {
     return request('/reports', { method: 'POST', body: JSON.stringify(payload) });
+  },
+  async updateReport(id, payload) {
+    return request(`/reports/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  },
+  async deleteReport(id) {
+    return request(`/reports/${id}`, { method: 'DELETE' });
   },
   async addReportFeedback(id, feedback) {
     return request(`/reports/${id}/feedback`, { method: 'POST', body: JSON.stringify({ feedback }) });
   },
   async getInternReport(id) {
     return request(`/reports/intern/${id}`);
+  },
+  async downloadInternReport(id) {
+    return download(`/interns/${id}/download-report`);
   },
 
   // ==========================================

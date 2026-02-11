@@ -42,6 +42,8 @@ func (h *ProfileHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var intern models.Intern
+	var gender, status sql.NullString
+
 	err := h.db.QueryRow(
 		`SELECT id, user_id, institution_id, supervisor_id, full_name, nis, student_id, school, department, date_of_birth,
 		        gender, phone, address, start_date, end_date, status, certificate_number, certificate_issued_at, created_at, updated_at
@@ -49,10 +51,17 @@ func (h *ProfileHandler) Get(w http.ResponseWriter, r *http.Request) {
 		claims.UserID,
 	).Scan(
 		&intern.ID, &intern.UserID, &intern.InstitutionID, &intern.SupervisorID, &intern.FullName, &intern.NIS, &intern.StudentID,
-		&intern.School, &intern.Department, &intern.DateOfBirth, &intern.Gender, &intern.Phone, &intern.Address,
-		&intern.StartDate, &intern.EndDate, &intern.Status, &intern.CertificateNumber, &intern.CertificateIssuedAt,
+		&intern.School, &intern.Department, &intern.DateOfBirth, &gender, &intern.Phone, &intern.Address,
+		&intern.StartDate, &intern.EndDate, &status, &intern.CertificateNumber, &intern.CertificateIssuedAt,
 		&intern.CreatedAt, &intern.UpdatedAt,
 	)
+
+	if gender.Valid {
+		intern.Gender = gender.String
+	}
+	if status.Valid {
+		intern.Status = status.String
+	}
 	if err == sql.ErrNoRows {
 		utils.RespondSuccess(w, "Profile retrieved", map[string]interface{}{
 			"user":   toUserResponse(user),

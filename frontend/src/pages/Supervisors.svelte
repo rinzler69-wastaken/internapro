@@ -1,9 +1,9 @@
 <script>
-  import { onMount } from 'svelte';
-  import { slide } from 'svelte/transition';
-  import { api } from '../lib/api.js';
-  import { portal } from '../lib/portal.js';
-  import { auth } from '../lib/auth.svelte.js';
+  import { onMount } from "svelte";
+  import { slide } from "svelte/transition";
+  import { api } from "../lib/api.js";
+  import { portal } from "../lib/portal.js";
+  import { auth } from "../lib/auth.svelte.js";
 
   // State
   let supervisors = $state([]);
@@ -11,8 +11,8 @@
   let editing = $state(null);
   let showEditModal = $state(false);
   let showCreateModal = $state(false);
-  let searchQuery = $state('');
-  let filterStatus = $state('');
+  let searchQuery = $state("");
+  let filterStatus = $state("");
   let currentPage = $state(1);
   let totalPages = $state(1);
   let searchTimeout;
@@ -20,41 +20,44 @@
 
   // Keep overlay-root click-through state in sync with our modals
   $effect(() => {
-    const root = typeof document !== 'undefined' ? document.querySelector('#overlay-root') : null;
+    const root =
+      typeof document !== "undefined"
+        ? document.querySelector("#overlay-root")
+        : null;
     if (!(root instanceof HTMLElement)) return;
     const hasModal = showCreateModal || showEditModal;
-    root.style.pointerEvents = hasModal ? 'auto' : 'none';
+    root.style.pointerEvents = hasModal ? "auto" : "none";
     if (!hasModal) {
-      root.dataset.portalCount = '0';
+      root.dataset.portalCount = "0";
     }
   });
 
   // Form State
   let form = $state({
-    name: '',
-    email: '',
-    password: '',
-    password_confirmation: '',
-    nip: '',
-    phone: '',
-    position: '',
-    address: '',
-    institution: '',
-    status: 'active',
+    name: "",
+    email: "",
+    password: "",
+    password_confirmation: "",
+    nip: "",
+    phone: "",
+    position: "",
+    address: "",
+    institution: "",
+    status: "active",
   });
 
   // Edit Form State
   let editForm = $state({
-    name: '',
-    email: '',
-    password: '',
-    password_confirmation: '',
-    nip: '',
-    phone: '',
-    position: '',
-    address: '',
-    institution: '',
-    status: '',
+    name: "",
+    email: "",
+    password: "",
+    password_confirmation: "",
+    nip: "",
+    phone: "",
+    position: "",
+    address: "",
+    institution: "",
+    status: "",
   });
 
   // --- Fetch Data ---
@@ -70,10 +73,10 @@
       const pagination = res.pagination || {};
       totalPages = Math.max(pagination.total_pages || 1, 1);
       currentPage = pagination.page || currentPage;
-      console.log('Fetched supervisors:', supervisors);
+      console.log("Fetched supervisors:", supervisors);
     } catch (err) {
-      console.error('Failed to fetch supervisors:', err);
-      alert('Gagal memuat data pembimbing: ' + err.message);
+      console.error("Failed to fetch supervisors:", err);
+      alert("Gagal memuat data pembimbing: " + err.message);
     } finally {
       loading = false;
     }
@@ -101,12 +104,12 @@
   // --- Create Supervisor ---
   async function createSupervisor() {
     if (!form.name || !form.email || !form.password) {
-      alert('Mohon lengkapi data wajib (Nama, Email, Password)');
+      alert("Mohon lengkapi data wajib (Nama, Email, Password)");
       return;
     }
 
     if (form.password !== form.password_confirmation) {
-      alert('Konfirmasi password tidak cocok');
+      alert("Konfirmasi password tidak cocok");
       return;
     }
 
@@ -114,49 +117,52 @@
       name: form.name,
       email: form.email,
       password: form.password,
-      nip: form.nip || '',
-      phone: form.phone || '',
-      position: form.position || '',
-      address: form.address || '',
-      institution: form.institution || '',
-      status: form.status || 'active',
+      nip: form.nip || "",
+      phone: form.phone || "",
+      position: form.position || "",
+      address: form.address || "",
+      institution: form.institution || "",
+      status: form.status || "active",
     };
 
-    console.log('Creating supervisor with payload:', payload);
+    console.log("Creating supervisor with payload:", payload);
 
     try {
       const result = await api.createSupervisor(payload);
-      console.log('Create result:', result);
-      alert('Berhasil menambah pembimbing!');
-      
+      console.log("Create result:", result);
+      alert("Berhasil menambah pembimbing!");
+
       // Reset form
       form = {
-        name: '',
-        email: '',
-        password: '',
-        password_confirmation: '',
-        nip: '',
-        phone: '',
-        position: '',
-        address: '',
-        institution: '',
-        status: 'active',
+        name: "",
+        email: "",
+        password: "",
+        password_confirmation: "",
+        nip: "",
+        phone: "",
+        position: "",
+        address: "",
+        institution: "",
+        status: "active",
       };
-      
+
       showCreateModal = false;
       await fetchSupervisors();
     } catch (err) {
-      console.error('Create supervisor error:', err);
-      alert('Gagal membuat pembimbing: ' + err.message);
+      console.error("Create supervisor error:", err);
+      alert("Gagal membuat pembimbing: " + err.message);
     }
   }
 
   // --- Update Supervisor ---
   async function updateSupervisor() {
     if (!editing) return;
-    
-    if (editForm.password && editForm.password !== editForm.password_confirmation) {
-      alert('Konfirmasi password baru tidak cocok');
+
+    if (
+      editForm.password &&
+      editForm.password !== editForm.password_confirmation
+    ) {
+      alert("Konfirmasi password baru tidak cocok");
       return;
     }
 
@@ -174,38 +180,38 @@
       payload.email = editForm.email;
     }
 
-    if (editForm.password && editForm.password.trim() !== '') {
+    if (editForm.password && editForm.password.trim() !== "") {
       payload.password = editForm.password;
     }
 
-    console.log('Updating supervisor with payload:', payload);
+    console.log("Updating supervisor with payload:", payload);
 
     try {
       const result = await api.updateSupervisor(editing.id, payload);
-      console.log('Update result:', result);
-      alert('Data pembimbing berhasil diperbarui');
+      console.log("Update result:", result);
+      alert("Data pembimbing berhasil diperbarui");
       closeEditModal();
       await fetchSupervisors();
     } catch (err) {
-      console.error('Update supervisor error:', err);
-      alert('Gagal memperbarui pembimbing: ' + err.message);
+      console.error("Update supervisor error:", err);
+      alert("Gagal memperbarui pembimbing: " + err.message);
     }
   }
 
   function startEdit(supervisor) {
     editing = supervisor;
-    console.log('Editing supervisor:', supervisor);
+    console.log("Editing supervisor:", supervisor);
     editForm = {
-      name: supervisor.full_name || supervisor.name || '',
-      email: supervisor.email || '',
-      password: '',
-      password_confirmation: '',
-      nip: supervisor.nip || '',
-      phone: supervisor.phone || '',
-      position: supervisor.position || '',
-      address: supervisor.address || '',
-      institution: supervisor.institution || '',
-      status: supervisor.status || 'active',
+      name: supervisor.full_name || supervisor.name || "",
+      email: supervisor.email || "",
+      password: "",
+      password_confirmation: "",
+      nip: supervisor.nip || "",
+      phone: supervisor.phone || "",
+      position: supervisor.position || "",
+      address: supervisor.address || "",
+      institution: supervisor.institution || "",
+      status: supervisor.status || "active",
     };
     showEditModal = true;
   }
@@ -217,16 +223,16 @@
 
   function resetForm() {
     form = {
-      name: '',
-      email: '',
-      password: '',
-      password_confirmation: '',
-      nip: '',
-      phone: '',
-      position: '',
-      address: '',
-      institution: '',
-      status: 'active',
+      name: "",
+      email: "",
+      password: "",
+      password_confirmation: "",
+      nip: "",
+      phone: "",
+      position: "",
+      address: "",
+      institution: "",
+      status: "active",
     };
   }
 
@@ -236,30 +242,35 @@
 
     try {
       await api.approveSupervisor(id);
-      
+
       // Update tampilan tabel secara langsung
-      const index = supervisors.findIndex(s => s.id === id);
+      const index = supervisors.findIndex((s) => s.id === id);
       if (index !== -1) {
-        supervisors[index].status = 'active';
+        supervisors[index].status = "active";
       }
-      
+
       alert(`Pembimbing ${name} telah disetujui`);
     } catch (err) {
-      console.error('Approve error:', err);
-      alert('Gagal melakukan approval: ' + err.message);
+      console.error("Approve error:", err);
+      alert("Gagal melakukan approval: " + err.message);
     }
   }
 
   // --- Deny/Delete Supervisor ---
   async function handleDeny(id, name) {
-    if (!confirm(`Apakah Anda yakin ingin MENOLAK dan MENGHAPUS pembimbing "${name}"? Data akan hilang permanen.`)) return;
+    if (
+      !confirm(
+        `Apakah Anda yakin ingin MENOLAK dan MENGHAPUS pembimbing "${name}"? Data akan hilang permanen.`,
+      )
+    )
+      return;
     try {
       await api.rejectSupervisor(id);
-      supervisors = supervisors.filter(s => s.id !== id);
+      supervisors = supervisors.filter((s) => s.id !== id);
       alert(`Pembimbing ${name} telah ditolak dan dihapus.`);
     } catch (err) {
-      console.error('Delete error:', err);
-      alert('Gagal menolak: ' + err.message);
+      console.error("Delete error:", err);
+      alert("Gagal menolak: " + err.message);
     }
   }
 
@@ -267,11 +278,11 @@
     if (!confirm(`Hapus pembimbing "${name}"?`)) return;
     try {
       await api.deleteSupervisor(id);
-      supervisors = supervisors.filter(s => s.id !== id);
+      supervisors = supervisors.filter((s) => s.id !== id);
       alert(`Pembimbing ${name} telah dihapus.`);
     } catch (err) {
-      console.error('Delete error:', err);
-      alert('Gagal menghapus: ' + err.message);
+      console.error("Delete error:", err);
+      alert("Gagal menghapus: " + err.message);
     }
   }
 
@@ -285,41 +296,105 @@
 </script>
 
 <div class="page-container animate-fade-in">
-
   <div class="flex items-center gap-3 pb-8">
     <h4 class="card-title">Daftar Pembimbing</h4>
     <span class="badge-count">{supervisors.length} Pembimbing</span>
   </div>
-  
+
   <!-- BAGIAN TABEL DAFTAR -->
   <div class="card table-card animate-slide-up" style="animation-delay: 0.1s;">
     <div class="card-header-row border-b">
       <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
-        {#if auth.user?.role === 'admin'}
-          <button class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm flex items-center justify-center gap-2" onclick={() => showCreateModal = true}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        {#if auth.user?.role === "admin"}
+          <button
+            class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm flex items-center justify-center gap-2"
+            onclick={() => (showCreateModal = true)}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><line x1="12" y1="5" x2="12" y2="19"></line><line
+                x1="5"
+                y1="12"
+                x2="19"
+                y2="12"
+              ></line></svg
+            >
             <span>Tambah</span>
           </button>
         {/if}
-        <button class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2" onclick={fetchSupervisors}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          onclick={fetchSupervisors}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path
+              d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"
+            /></svg
+          >
           <span>Refresh</span>
         </button>
       </div>
       <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
-        <button class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2" onclick={goToPreviousPage} disabled={currentPage <= 1}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          onclick={goToPreviousPage}
+          disabled={currentPage <= 1}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><path d="M15 18l-6-6 6-6" /></svg
+          >
           <span>Prev</span>
         </button>
 
-        <div class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 pagination-pill">
+        <div
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 pagination-pill"
+        >
           <span>{currentPage}</span>
           <span class="text-slate-500">of</span>
           <span>{totalPages}</span>
         </div>
 
-        <button class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2" onclick={goToNextPage} disabled={currentPage >= totalPages}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          onclick={goToNextPage}
+          disabled={currentPage >= totalPages}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg
+          >
           <span>Next</span>
         </button>
       </div>
@@ -328,17 +403,23 @@
     <div class="toolbar">
       <div class="search-wrapper">
         <span class="material-symbols-outlined search-icon">search</span>
-        <input 
-          type="text" 
-          bind:value={searchQuery} 
+        <input
+          type="text"
+          bind:value={searchQuery}
           oninput={handleSearchInput}
-          onkeydown={(e) => e.key === 'Enter' && (clearTimeout(searchTimeout), fetchSupervisors())}
-          placeholder="Cari Nama, Email, atau Institusi..." 
+          onkeydown={(e) =>
+            e.key === "Enter" &&
+            (clearTimeout(searchTimeout), fetchSupervisors())}
+          placeholder="Cari Nama, Email, atau Institusi..."
           class="search-input"
         />
       </div>
-      
-      <select bind:value={filterStatus} onchange={fetchSupervisors} class="filter-select">
+
+      <select
+        bind:value={filterStatus}
+        onchange={fetchSupervisors}
+        class="filter-select"
+      >
         <option value="">Semua Status</option>
         <option value="active">Aktif</option>
         <!-- <option value="pending">Pending</option> -->
@@ -352,7 +433,24 @@
       </div>
     {:else if supervisors.length === 0}
       <div class="empty-state">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#e5e7eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#e5e7eb"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          ><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle
+            cx="9"
+            cy="7"
+            r="4"
+          ></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path
+            d="M16 3.13a4 4 0 0 1 0 7.75"
+          ></path></svg
+        >
         <p>Belum ada data pembimbing.</p>
       </div>
     {:else}
@@ -374,53 +472,116 @@
               <tr class="table-row">
                 <td>
                   <div class="user-info">
-                    <div class="avatar-placeholder">{s.full_name ? s.full_name[0].toUpperCase() : s.name ? s.name[0].toUpperCase() : 'S'}</div>
+                    <div class="avatar-placeholder">
+                      {s.full_name
+                        ? s.full_name[0].toUpperCase()
+                        : s.name
+                          ? s.name[0].toUpperCase()
+                          : "S"}
+                    </div>
                     <div class="user-details">
-                      <span class="user-name">{s.full_name || s.name || '-'}</span>
+                      <span class="user-name"
+                        >{s.full_name || s.name || "-"}</span
+                      >
                     </div>
                   </div>
                 </td>
-                <td class="text-muted">{s.email || '-'}</td>
-                <td class="text-muted">{s.institution || '-'}</td>
-                <td class="text-muted">{s.position || '-'}</td>
+                <td class="text-muted">{s.email || "-"}</td>
+                <td class="text-muted">{s.institution || "-"}</td>
+                <td class="text-muted">{s.position || "-"}</td>
                 <td class="text-center text-muted">{s.interns_count || 0}</td>
                 <td class="text-center">
-                  <span class={`status-badge status-${s.status || 'inactive'}`}>
-                    {s.status || 'inactive'}
+                  <span class={`status-badge status-${s.status || "inactive"}`}>
+                    {s.status || "inactive"}
                   </span>
                 </td>
                 <td class="text-right">
-                  <div class="action-buttons responsive">
-                    {#if s.status === 'pending'}
-                      <button 
-                        class="btn-icon btn-deny flex-1" 
-                        onclick={() => handleDeny(s.id, s.full_name || s.name)}
-                        title="Tolak & Hapus"
+                  {#if s.status === "pending"}
+                    <button
+                      class="btn-icon btn-deny flex-1"
+                      onclick={() => handleDeny(s.id, s.full_name || s.name)}
+                      title="Tolak & Hapus"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        ><line x1="18" y1="6" x2="6" y2="18"></line><line
+                          x1="6"
+                          y1="6"
+                          x2="18"
+                          y2="18"
+                        ></line></svg
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                        <span class="btn-label">Tolak</span>
-                      </button>
-                      <button 
-                        class="btn-icon btn-approve flex-1" 
-                        onclick={() => handleApprove(s.id, s.full_name || s.name)}
-                        title="Setujui Pembimbing Ini"
+                      <span class="btn-label">Tolak</span>
+                    </button>
+                    <button
+                      class="btn-icon btn-approve flex-1"
+                      onclick={() => handleApprove(s.id, s.full_name || s.name)}
+                      title="Setujui Pembimbing Ini"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        ><polyline points="20 6 9 17 4 12"></polyline></svg
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                        <span class="btn-label">Terima</span>
-                      </button>
-                    {:else}
-                      {#if auth.user?.role === 'admin'}
-                        <button class="px-2 py-2 rounded-full text-sm font-semibold border border-slate-200 hover:border-slate-300 text-slate-200 hover:text-white bg-slate-900 hover:bg-slate-800 pointer-cursor transition-all flex items-center justify-center gap-2 flex-1" onclick={() => startEdit(s)} title="Edit data">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-                          <span>Edit</span>
-                        </button>
-                        <button class="px-2 py-2 rounded-full text-sm font-semibold border border-red-200 hover:border-red-300 text-slate-200 hover:text-white bg-red-600 hover:bg-red-500 pointer-cursor transition-all flex items-center justify-center gap-2 flex-1" onclick={() => handleDelete(s.id, s.full_name || s.name)} title="Hapus">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                          <span>Hapus</span>
-                        </button>
-                      {/if}
-                    {/if}
-                  </div>
+                      <span class="btn-label">Terima</span>
+                    </button>
+                  {:else if auth.user?.role === "admin"}
+                    <button
+                      class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100"
+                      onclick={() => startEdit(s)}
+                      title="Edit Data"
+                    >
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <path
+                          d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                        ></path>
+                        <path
+                          d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                        ></path>
+                      </svg>
+                    </button>
+                    <button
+                      class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100"
+                      onclick={() => handleDelete(s.id, s.full_name || s.name)}
+                      title="Hapus"
+                    >
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path
+                          d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                        ></path>
+                      </svg>
+                    </button>
+                  {/if}
                 </td>
               </tr>
             {/each}
@@ -434,40 +595,54 @@
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="entry-head" onclick={() => toggleExpand(s.id)}>
               <div class="user-info">
-                <div class="avatar-placeholder">{s.full_name ? s.full_name[0].toUpperCase() : s.name ? s.name[0].toUpperCase() : 'S'}</div>
+                <div class="avatar-placeholder">
+                  {s.full_name
+                    ? s.full_name[0].toUpperCase()
+                    : s.name
+                      ? s.name[0].toUpperCase()
+                      : "S"}
+                </div>
                 <div class="user-details">
-                  <div class="user-name">{s.full_name || s.name || '-'}</div>
-                  <div class="text-muted small">{s.email || '-'}</div>
+                  <div class="user-name">{s.full_name || s.name || "-"}</div>
+                  <div class="text-muted small">{s.email || "-"}</div>
                 </div>
               </div>
               <button class="expand-btn">
-                <span class="material-symbols-outlined transition-transform duration-200 {expandedSupervisors[s.id] ? 'rotate-180' : ''}">expand_more</span>
+                <span
+                  class="material-symbols-outlined transition-transform duration-200 {expandedSupervisors[
+                    s.id
+                  ]
+                    ? 'rotate-180'
+                    : ''}">expand_more</span
+                >
               </button>
             </div>
-            
+
             {#if expandedSupervisors[s.id]}
               <div class="entry-details" transition:slide={{ duration: 200 }}>
                 <div class="detail-row">
                   <div class="detail-label">STATUS</div>
-                  <span class={`status-badge equal-badge ${s.status === 'active' ? 'bg-emerald-100 text-emerald-700' : s.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-100 text-slate-600'}`}>
-                    {s.status || 'inactive'}
+                  <span
+                    class={`status-badge equal-badge ${s.status === "active" ? "bg-emerald-100 text-emerald-700" : s.status === "pending" ? "bg-yellow-100 text-yellow-700" : "bg-slate-100 text-slate-600"}`}
+                  >
+                    {s.status || "inactive"}
                   </span>
                 </div>
                 <div class="detail-row">
                   <div class="detail-label">INSTITUSI</div>
-                  <div class="detail-value">{s.institution || '-'}</div>
+                  <div class="detail-value">{s.institution || "-"}</div>
                 </div>
                 <div class="detail-row">
                   <div class="detail-label">POSISI</div>
-                  <div class="detail-value">{s.position || '-'}</div>
+                  <div class="detail-value">{s.position || "-"}</div>
                 </div>
                 <div class="detail-row">
                   <div class="detail-label">NIP</div>
-                  <div class="detail-value">{s.nip || '-'}</div>
+                  <div class="detail-value">{s.nip || "-"}</div>
                 </div>
                 <div class="detail-row">
                   <div class="detail-label">TELEPON</div>
-                  <div class="detail-value">{s.phone || '-'}</div>
+                  <div class="detail-value">{s.phone || "-"}</div>
                 </div>
                 <div class="detail-row">
                   <div class="detail-label">JUMLAH INTERN</div>
@@ -475,26 +650,48 @@
                 </div>
 
                 <div class="mobile-actions mt-4 pt-4 border-t border-slate-100">
-                  {#if s.status === 'pending'}
-                    <button class="mini-btn mobile danger" onclick={(e) => { e.stopPropagation(); handleDeny(s.id, s.full_name || s.name); }}>
+                  {#if s.status === "pending"}
+                    <button
+                      class="mini-btn mobile danger"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        handleDeny(s.id, s.full_name || s.name);
+                      }}
+                    >
                       <span class="material-symbols-outlined">close</span>
                       <span class="btn-text">Tolak</span>
                     </button>
-                    <button class="mini-btn mobile success" onclick={(e) => { e.stopPropagation(); handleApprove(s.id, s.full_name || s.name); }}>
+                    <button
+                      class="mini-btn mobile success"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        handleApprove(s.id, s.full_name || s.name);
+                      }}
+                    >
                       <span class="material-symbols-outlined">check</span>
                       <span class="btn-text">Terima</span>
                     </button>
-                  {:else}
-                    {#if auth.user?.role === 'admin'}
-                      <button class="mini-btn mobile" onclick={(e) => { e.stopPropagation(); startEdit(s); }}>
-                        <span class="material-symbols-outlined">edit</span>
-                        <span class="btn-text">Edit</span>
-                      </button>
-                      <button class="mini-btn mobile danger" onclick={(e) => { e.stopPropagation(); handleDelete(s.id, s.full_name || s.name); }}>
-                        <span class="material-symbols-outlined">delete</span>
-                        <span class="btn-text">Hapus</span>
-                      </button>
-                    {/if}
+                  {:else if auth.user?.role === "admin"}
+                    <button
+                      class="mini-btn mobile"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        startEdit(s);
+                      }}
+                    >
+                      <span class="material-symbols-outlined">edit</span>
+                      <span class="btn-text">Edit</span>
+                    </button>
+                    <button
+                      class="mini-btn mobile danger"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(s.id, s.full_name || s.name);
+                      }}
+                    >
+                      <span class="material-symbols-outlined">delete</span>
+                      <span class="btn-text">Hapus</span>
+                    </button>
                   {/if}
                 </div>
               </div>
@@ -509,53 +706,126 @@
   {#if showCreateModal}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="fixed inset-0 z-120 flex items-center justify-center p-4 sm:p-6" use:portal>
-      <div class="absolute inset-0 z-110 bg-slate-900/40 backdrop-blur-sm transition-opacity"></div>
-      <div class="relative bg-white z-120 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" onclick={(e) => e.stopPropagation()}>
-        <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+    <div
+      class="fixed inset-0 z-120 flex items-center justify-center p-4 sm:p-6"
+      use:portal
+    >
+      <div
+        class="absolute inset-0 z-110 bg-slate-900/40 backdrop-blur-sm transition-opacity"
+      ></div>
+      <div
+        class="relative bg-white z-120 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <div
+          class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50"
+        >
           <h3 class="font-bold text-lg text-slate-800">Tambah Pembimbing</h3>
-          <button onclick={() => showCreateModal = false} class="text-slate-400 hover:text-slate-600">
+          <button
+            onclick={() => (showCreateModal = false)}
+            class="text-slate-400 hover:text-slate-600"
+          >
             <span class="material-symbols-outlined">close</span>
           </button>
         </div>
-        
+
         <div class="p-6 overflow-y-auto">
           <div class="form-grid">
             <div class="form-group">
-              <label class="form-label" for="name">Nama Lengkap <span class="text-red-500">*</span></label>
-              <input class="input" bind:value={form.name} id="name" placeholder="Contoh: Dr. Budi Santoso" required />
+              <label class="form-label" for="name"
+                >Nama Lengkap <span class="text-red-500">*</span></label
+              >
+              <input
+                class="input"
+                bind:value={form.name}
+                id="name"
+                placeholder="Contoh: Dr. Budi Santoso"
+                required
+              />
             </div>
             <div class="form-group">
-              <label class="form-label" for="email">Email <span class="text-red-500">*</span></label>
-              <input class="input" type="email" bind:value={form.email} id="email" placeholder="email@institusi.com" required />
+              <label class="form-label" for="email"
+                >Email <span class="text-red-500">*</span></label
+              >
+              <input
+                class="input"
+                type="email"
+                bind:value={form.email}
+                id="email"
+                placeholder="email@institusi.com"
+                required
+              />
             </div>
             <div class="form-group">
-              <label class="form-label" for="password">Password <span class="text-red-500">*</span></label>
-              <input class="input" type="password" bind:value={form.password} id="password" placeholder="Min. 6 karakter" required />
+              <label class="form-label" for="password"
+                >Password <span class="text-red-500">*</span></label
+              >
+              <input
+                class="input"
+                type="password"
+                bind:value={form.password}
+                id="password"
+                placeholder="Min. 6 karakter"
+                required
+              />
             </div>
             <div class="form-group">
-              <label class="form-label" for="password_confirmation">Ulangi Password <span class="text-red-500">*</span></label>
-              <input class="input" type="password" bind:value={form.password_confirmation} id="password_confirmation" placeholder="Ulangi password" required />
+              <label class="form-label" for="password_confirmation"
+                >Ulangi Password <span class="text-red-500">*</span></label
+              >
+              <input
+                class="input"
+                type="password"
+                bind:value={form.password_confirmation}
+                id="password_confirmation"
+                placeholder="Ulangi password"
+                required
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="nip">NIP</label>
-              <input class="input" bind:value={form.nip} id="nip" placeholder="Nomor Induk Pegawai" />
+              <input
+                class="input"
+                bind:value={form.nip}
+                id="nip"
+                placeholder="Nomor Induk Pegawai"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="phone">Telepon</label>
-              <input class="input" bind:value={form.phone} id="phone" placeholder="Nomor telepon" />
+              <input
+                class="input"
+                bind:value={form.phone}
+                id="phone"
+                placeholder="Nomor telepon"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="position">Posisi</label>
-              <input class="input" bind:value={form.position} id="position" placeholder="Jabatan" />
+              <input
+                class="input"
+                bind:value={form.position}
+                id="position"
+                placeholder="Jabatan"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="institution">Institusi</label>
-              <input class="input" bind:value={form.institution} id="institution" placeholder="Nama institusi" />
+              <input
+                class="input"
+                bind:value={form.institution}
+                id="institution"
+                placeholder="Nama institusi"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="address">Alamat</label>
-              <input class="input" bind:value={form.address} id="address" placeholder="Alamat lengkap" />
+              <input
+                class="input"
+                bind:value={form.address}
+                id="address"
+                placeholder="Alamat lengkap"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="status">Status</label>
@@ -567,9 +837,16 @@
           </div>
         </div>
 
-        <div class="p-5 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
-          <button class="btn btn-outline" onclick={() => showCreateModal = false}>Batal</button>
-          <button class="btn btn-primary" onclick={createSupervisor}>Simpan Data</button>
+        <div
+          class="p-5 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3"
+        >
+          <button
+            class="btn btn-outline"
+            onclick={() => (showCreateModal = false)}>Batal</button
+          >
+          <button class="btn btn-primary" onclick={createSupervisor}
+            >Simpan Data</button
+          >
         </div>
       </div>
     </div>
@@ -579,58 +856,130 @@
   {#if showEditModal}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="fixed inset-0 z-120 flex items-center justify-center p-4 sm:p-6" use:portal>
-      <div class="absolute inset-0 z-110 bg-slate-900/40 backdrop-blur-sm transition-opacity"></div>
-      <div class="relative bg-white z-120 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" onclick={(e) => e.stopPropagation()}>
-        <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+    <div
+      class="fixed inset-0 z-120 flex items-center justify-center p-4 sm:p-6"
+      use:portal
+    >
+      <div
+        class="absolute inset-0 z-110 bg-slate-900/40 backdrop-blur-sm transition-opacity"
+      ></div>
+      <div
+        class="relative bg-white z-120 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <div
+          class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50"
+        >
           <h3 class="font-bold text-lg text-slate-800">Edit Data Pembimbing</h3>
-          <button onclick={closeEditModal} class="text-slate-400 hover:text-slate-600">
+          <button
+            onclick={closeEditModal}
+            class="text-slate-400 hover:text-slate-600"
+          >
             <span class="material-symbols-outlined">close</span>
           </button>
         </div>
-        
+
         <div class="p-6 overflow-y-auto">
           <div class="form-grid">
             <div class="form-group">
               <label class="form-label" for="edit_name">Nama Lengkap</label>
-              <input class="input" bind:value={editForm.name} id="edit_name" placeholder="Contoh: Dr. Budi Santoso" />
+              <input
+                class="input"
+                bind:value={editForm.name}
+                id="edit_name"
+                placeholder="Contoh: Dr. Budi Santoso"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="edit_email">Email</label>
-              <input class="input" type="email" bind:value={editForm.email} id="edit_email" placeholder="email@institusi.com" disabled />
-              <small class="text-xs text-gray-500 mt-1">Email tidak dapat diubah</small>
+              <input
+                class="input"
+                type="email"
+                bind:value={editForm.email}
+                id="edit_email"
+                placeholder="email@institusi.com"
+                disabled
+              />
+              <small class="text-xs text-gray-500 mt-1"
+                >Email tidak dapat diubah</small
+              >
             </div>
             <div class="form-group">
-              <label class="form-label" for="edit_password">Password Baru (Opsional)</label>
-              <input class="input" type="password" bind:value={editForm.password} id="edit_password" placeholder="Kosongkan jika tidak ingin mengubah" />
+              <label class="form-label" for="edit_password"
+                >Password Baru (Opsional)</label
+              >
+              <input
+                class="input"
+                type="password"
+                bind:value={editForm.password}
+                id="edit_password"
+                placeholder="Kosongkan jika tidak ingin mengubah"
+              />
             </div>
             <div class="form-group">
-                <label class="form-label" for="edit_password_confirmation">Ulangi Password Baru</label>
-                <input class="input" type="password" bind:value={editForm.password_confirmation} id="edit_password_confirmation" placeholder="Ulangi password baru" />
-              </div>
-              <div class="form-group">
+              <label class="form-label" for="edit_password_confirmation"
+                >Ulangi Password Baru</label
+              >
+              <input
+                class="input"
+                type="password"
+                bind:value={editForm.password_confirmation}
+                id="edit_password_confirmation"
+                placeholder="Ulangi password baru"
+              />
+            </div>
+            <div class="form-group">
               <label class="form-label" for="edit_nip">NIP</label>
-              <input class="input" bind:value={editForm.nip} id="edit_nip" placeholder="Nomor Induk Pegawai" />
+              <input
+                class="input"
+                bind:value={editForm.nip}
+                id="edit_nip"
+                placeholder="Nomor Induk Pegawai"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="edit_phone">Telepon</label>
-              <input class="input" bind:value={editForm.phone} id="edit_phone" placeholder="Nomor telepon" />
+              <input
+                class="input"
+                bind:value={editForm.phone}
+                id="edit_phone"
+                placeholder="Nomor telepon"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="edit_position">Posisi</label>
-              <input class="input" bind:value={editForm.position} id="edit_position" placeholder="Jabatan" />
+              <input
+                class="input"
+                bind:value={editForm.position}
+                id="edit_position"
+                placeholder="Jabatan"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="edit_institution">Institusi</label>
-              <input class="input" bind:value={editForm.institution} id="edit_institution" placeholder="Nama institusi" />
+              <input
+                class="input"
+                bind:value={editForm.institution}
+                id="edit_institution"
+                placeholder="Nama institusi"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="edit_address">Alamat</label>
-              <input class="input" bind:value={editForm.address} id="edit_address" placeholder="Alamat lengkap" />
+              <input
+                class="input"
+                bind:value={editForm.address}
+                id="edit_address"
+                placeholder="Alamat lengkap"
+              />
             </div>
             <div class="form-group">
               <label class="form-label" for="edit_status">Status</label>
-              <select class="input" id="edit_status" bind:value={editForm.status}>
+              <select
+                class="input"
+                id="edit_status"
+                bind:value={editForm.status}
+              >
                 <!-- <option value="pending">Pending</option> -->
                 <option value="active">Aktif</option>
               </select>
@@ -638,9 +987,14 @@
           </div>
         </div>
 
-        <div class="p-5 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
-          <button class="btn btn-outline" onclick={closeEditModal}>Batal</button>
-          <button class="btn btn-primary" onclick={updateSupervisor}>Simpan Perubahan</button>
+        <div
+          class="p-5 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3"
+        >
+          <button class="btn btn-outline" onclick={closeEditModal}>Batal</button
+          >
+          <button class="btn btn-primary" onclick={updateSupervisor}
+            >Simpan Perubahan</button
+          >
         </div>
       </div>
     </div>
@@ -652,15 +1006,19 @@
 
   .page-container {
     animation: fadeIn 0.5s ease-out;
-    max-width: 1400px;
+    max-width: 1200px;
     margin: 0 auto;
     width: 100%;
     padding: 0 16px;
   }
 
   @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   /* Card Styles */
@@ -668,7 +1026,7 @@
     background: white;
     border-radius: 20px;
     border: 1px solid #e2e8f0;
-    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
     overflow: hidden;
   }
 
@@ -677,7 +1035,7 @@
   }
 
   .table-card {
-    padding: 0; 
+    padding: 0;
   }
 
   .text-muted {
@@ -704,7 +1062,7 @@
     color: #374151;
     margin-bottom: 6px;
   }
-  
+
   .input {
     width: 100%;
     padding: 10px 14px;
@@ -764,7 +1122,7 @@
     background: linear-gradient(135deg, #1d4ed8, #1e40af);
     box-shadow: 0 4px 6px rgba(37, 99, 235, 0.3);
   }
-  
+
   .btn-outline {
     background: white;
     border: 1px solid #e5e7eb;
@@ -791,7 +1149,7 @@
     transition: all 0.2s;
     box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
   }
-  
+
   .btn-approve:hover {
     background-color: #059669;
     box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);
@@ -810,7 +1168,7 @@
     cursor: pointer;
     transition: all 0.2s;
   }
-  
+
   .btn-deny:hover {
     background-color: #ef4444;
     color: white;
@@ -834,24 +1192,30 @@
     color: #111827;
     display: inline-block;
   }
-  @media (max-width: 640px) {
+  @media (max-width: 900px) {
     .card-header-row {
       flex-direction: column;
       align-items: stretch;
       gap: 12px;
     }
-    .toolbar { padding: 14px 16px; }
-    .search-wrapper { flex: 1 1 100%; }
-    .filter-select { width: 100%; }
+    .toolbar {
+      padding: 14px 16px;
+    }
+    .search-wrapper {
+      flex: 1 1 100%;
+    }
+    .filter-select {
+      width: 100%;
+    }
   }
 
-  .badge-count { 
-    background: #f1f5f9; 
-    color: #64748b; 
-    padding: 4px 10px; 
-    border-radius: 20px; 
-    font-size: 14px; 
-    font-weight: 600; 
+  .badge-count {
+    background: #f1f5f9;
+    color: #64748b;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
   }
 
   .sidebar,
@@ -882,7 +1246,7 @@
   }
   .search-icon {
     color: #9ca3af;
-    font-variation-settings: 'wght' 550;
+    font-variation-settings: "wght" 550;
   }
   .search-input {
     flex: 1;
@@ -892,7 +1256,9 @@
     background: transparent;
     color: #111827;
   }
-  .search-input::placeholder { color: #9ca3af; }
+  .search-input::placeholder {
+    color: #9ca3af;
+  }
 
   .filter-select {
     min-width: 180px;
@@ -912,11 +1278,16 @@
 
   .table {
     width: 100%;
+    min-width: 900px;
     border-collapse: collapse;
     font-size: 0.925rem;
   }
-  .desktop-only { display:block; }
-  .mobile-list { display:none; }
+  .desktop-only {
+    display: block;
+  }
+  .mobile-list {
+    display: none;
+  }
 
   .table th {
     text-align: left;
@@ -982,18 +1353,33 @@
     text-overflow: ellipsis;
   }
 
-  .text-placeholder { color: #d1d5db; font-size: 1.2rem; }
-  .text-center { text-align: center; }
-  .text-right { text-align: right; }
+  .text-placeholder {
+    color: #d1d5db;
+    font-size: 1.2rem;
+  }
+  .text-center {
+    text-align: center;
+  }
+  .text-right {
+    text-align: right;
+    min-width: 150px;
+    white-space: nowrap;
+  }
 
   .pagination-pill {
     min-width: 128px;
   }
 
   /* Modal z-index helpers */
-  :global(.z-120) { z-index: 120; }
-  :global(.z-110) { z-index: 110; }
-  :global(.z-100) { z-index: 100; }
+  :global(.z-120) {
+    z-index: 120;
+  }
+  :global(.z-110) {
+    z-index: 110;
+  }
+  :global(.z-100) {
+    z-index: 100;
+  }
 
   .action-buttons {
     display: inline-flex;
@@ -1033,10 +1419,33 @@
     color: #4b5563;
     border: 1px solid #e5e7eb;
   }
-  .bg-emerald-100 { background: #ecfdf5; border-color: #a7f3d0; } .text-emerald-700 { color: #047857; }
-  .bg-yellow-100 { background: #fefce8; border-color: #fef08a; } .text-yellow-700 { color: #a16207; }
-  .bg-slate-100 { background: #f1f5f9; border-color: #e2e8f0; } .text-slate-600 { color: #475569; }
-  .equal-badge { min-width: 96px; text-align:center; justify-content:center; display:inline-flex; }
+  .bg-emerald-100 {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+  }
+  .text-emerald-700 {
+    color: #047857;
+  }
+  .bg-yellow-100 {
+    background: #fefce8;
+    border-color: #fef08a;
+  }
+  .text-yellow-700 {
+    color: #a16207;
+  }
+  .bg-slate-100 {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+  }
+  .text-slate-600 {
+    color: #475569;
+  }
+  .equal-badge {
+    min-width: 96px;
+    text-align: center;
+    justify-content: center;
+    display: inline-flex;
+  }
 
   /* States */
   .loading-state {
@@ -1044,7 +1453,7 @@
     text-align: center;
     color: #6b7280;
   }
-  
+
   .empty-state {
     padding: 40px;
     text-align: center;
@@ -1066,8 +1475,12 @@
   }
 
   @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
   }
 
   .btn-icon {
@@ -1078,47 +1491,134 @@
     justify-content: center;
     gap: 6px;
   }
-  .btn-label { display: none; font-weight: 700; font-size: 0.85rem; }
-
-  .text-red-500 { color: #ef4444; }
-  .text-xs { font-size: 0.75rem; }
-  .text-gray-500 { color: #6b7280; }
-  .mt-1 { margin-top: 0.25rem; }
-  .flex { display: flex; }
-  .gap-2 { gap: 0.5rem; }
-  .gap-3 { gap: 0.75rem; }
-  .items-center { align-items: center; }
-  .border-b { border-bottom: 1px solid #f1f5f9; }
-
-  @media (max-width: 640px) {
-    .table-responsive { overflow: visible; }
-    .table, .table thead { display: block; }
-    .table tbody { display: grid; gap: 12px; }
-    .table tr { display: grid; gap: 8px; padding: 14px; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.03); }
-    .table td, .table th { padding: 4px 0; border: none; }
-    .text-right { text-align: left; }
-    .action-buttons.responsive { width: 100%; }
-    .action-buttons.responsive .btn-icon { flex: 1 1 48%; width: 100%; }
-    .action-buttons span,
-    .btn-label { display: inline; }
-    .user-info { align-items: flex-start; }
+  .btn-label {
+    display: none;
+    font-weight: 700;
+    font-size: 0.85rem;
   }
-  @media (max-width: 768px) {
-    .desktop-only { display:none; }
-    .mobile-list { display:flex; flex-direction:column; gap:12px; }
+
+  .text-red-500 {
+    color: #ef4444;
+  }
+  .text-xs {
+    font-size: 0.75rem;
+  }
+  .text-gray-500 {
+    color: #6b7280;
+  }
+  .mt-1 {
+    margin-top: 0.25rem;
+  }
+  .flex {
+    display: flex;
+  }
+  .gap-2 {
+    gap: 0.5rem;
+  }
+  .gap-3 {
+    gap: 0.75rem;
+  }
+  .items-center {
+    align-items: center;
+  }
+  .border-b {
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  @media (max-width: 900px) {
+    .table-responsive {
+      overflow: visible;
+    }
+    .table,
+    .table thead {
+      display: block;
+    }
+    .table tbody {
+      display: grid;
+      gap: 12px;
+    }
+    .table tr {
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+    }
+    .table td,
+    .table th {
+      padding: 4px 0;
+      border: none;
+    }
+    .text-right {
+      text-align: left;
+    }
+    .action-buttons.responsive {
+      width: 100%;
+    }
+    .action-buttons span,
+    .btn-label {
+      display: inline;
+    }
+    .user-info {
+      align-items: flex-start;
+    }
+  }
+  @media (max-width: 900px) {
+    .desktop-only {
+      display: none;
+    }
+    .mobile-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
     .entry-card {
       padding: 14px;
       border-radius: 16px;
       border: 1px solid #e2e8f0;
       background: #ffffff;
-      box-shadow: 0 6px 20px -18px rgba(15,23,42,0.3);
+      box-shadow: 0 6px 20px -18px rgba(15, 23, 42, 0.3);
     }
-    .entry-head { display:flex; align-items:center; justify-content:space-between; gap:10px; cursor: pointer; }
-    .entry-head .user-details { display: flex; flex-direction: column; min-width: 0; }
-    .entry-head .user-name { font-size: 0.95rem; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .entry-head .text-muted { font-size: 0.8rem; color: #64748b; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .entry-head .avatar-placeholder { width: 40px; height: 40px; font-size: 1rem; flex-shrink: 0; }
-    .entry-details { margin-top: 16px; padding-top: 16px; border-top: 1px solid #f1f5f9; }
+    .entry-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .entry-head .user-details {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .entry-head .user-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #0f172a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .entry-head .text-muted {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .entry-head .avatar-placeholder {
+      width: 40px;
+      height: 40px;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+    .entry-details {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #f1f5f9;
+    }
 
     .entry-head .user-info {
       display: grid;
@@ -1129,34 +1629,113 @@
       min-width: 0;
     }
 
-    .detail-row { margin-bottom: 16px; }
-    .detail-row:last-child { margin-bottom: 0; }
-    .detail-label { font-size:11px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; margin-bottom: 4px; }
-    .detail-value { font-weight:600; color:#0f172a; font-size: 14px; }
-    
+    .detail-row {
+      margin-bottom: 16px;
+    }
+    .detail-row:last-child {
+      margin-bottom: 0;
+    }
+    .detail-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .detail-value {
+      font-weight: 600;
+      color: #0f172a;
+      font-size: 14px;
+    }
+
     .expand-btn {
-      width: 32px; height: 32px;
-      display: flex; align-items: center; justify-content: center;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       border-radius: 50%;
       background: #f8fafc;
       color: #64748b;
       border: none;
     }
-    .mobile-actions { display:flex; gap:10px; }
-    .mini-btn {
-      display:inline-flex; align-items:center; gap:6px;
-      padding:8px 16px; border-radius:9999px; border:1px solid #0f172a;
-      background:#0f172a; color:#fff; font-weight:700; font-size:13px;
-      cursor:pointer; transition:all 0.15s ease; flex:1; justify-content:center;
+    .mobile-actions {
+      display: flex;
+      gap: 10px;
     }
-    .mini-btn .btn-text { display:inline; }
-    .mini-btn.success { background:#10b981; border-color:#10b981; }
-    .mini-btn.danger { background:#ef4444; border-color:#ef4444; }
+    .mini-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 9999px;
+      border: 1px solid #0f172a;
+      background: #0f172a;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      flex: 1;
+      justify-content: center;
+    }
+    .mini-btn .btn-text {
+      display: inline;
+    }
+    .mini-btn.success {
+      background: #10b981;
+      border-color: #10b981;
+    }
+    .mini-btn.danger {
+      background: #ef4444;
+      border-color: #ef4444;
+    }
   }
 
   /* Animations */
-  .animate-fade-in { opacity: 0; animation: fadeIn 0.6s ease-out forwards; }
-  .animate-slide-up { opacity: 0; animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-  @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .animate-fade-in {
+    opacity: 0;
+    animation: fadeIn 0.6s ease-out forwards;
+  }
+  .animate-slide-up {
+    opacity: 0;
+    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Action Buttons - Standardized */
+  .btn-icon {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-icon:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+  }
 </style>

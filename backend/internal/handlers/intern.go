@@ -276,7 +276,7 @@ func (h *InternHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	status := req.Status
 	if status == "" {
-		status = "active"
+		status = "pending" // Default to pending for approval
 	}
 
 	var passwordHash sql.NullString
@@ -289,6 +289,18 @@ func (h *InternHandler) Create(w http.ResponseWriter, r *http.Request) {
 		passwordHash = sql.NullString{String: string(hashed), Valid: true}
 	}
 
+	// Check for existing "new_user" via token
+	var existingUserID int64
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if claims, err := middleware.ParseToken(tokenString); err == nil {
+			if claims.Role == "new_user" {
+				existingUserID = claims.UserID
+			}
+		}
+	}
+
 	tx, err := h.db.Begin()
 	if err != nil {
 		utils.RespondInternalError(w, "Failed to start transaction")
@@ -296,16 +308,50 @@ func (h *InternHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Insert user
-	res, err := tx.Exec(
-		"INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'intern')",
-		req.FullName, req.Email, nullIfEmptySQL(passwordHash),
-	)
-	if err != nil {
-		utils.RespondBadRequest(w, "Email already exists or invalid user payload")
-		return
+	var userID int64
+
+	if existingUserID > 0 {
+		// Upgrade existing user
+		userID = existingUserID
+
+		updates := []string{"role = 'intern'"}
+		args := []interface{}{}
+
+		if req.FullName != "" {
+			updates = append(updates, "name = ?")
+			args = append(args, req.FullName)
+		}
+
+		// Only update password if provided
+		if passwordHash.Valid {
+			updates = append(updates, "password_hash = ?")
+			args = append(args, passwordHash.String)
+		}
+
+		// We do NOT update email here to avoid hijacking if token is compromised but email is different?
+		// Actually, if they own the token, they own the account.
+		// If they change email in form, we should probably update it, but let's stick to the one in token/DB for safety unless we re-verify.
+		// For simplicity, we trust the token's user.
+
+		query := "UPDATE users SET " + strings.Join(updates, ", ") + " WHERE id = ?"
+		args = append(args, userID)
+
+		if _, err := tx.Exec(query, args...); err != nil {
+			utils.RespondInternalError(w, "Failed to upgrade user profile")
+			return
+		}
+	} else {
+		// Insert new user
+		res, err := tx.Exec(
+			"INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'intern')",
+			req.FullName, req.Email, nullIfEmptySQL(passwordHash),
+		)
+		if err != nil {
+			utils.RespondBadRequest(w, "Email already exists or invalid user payload")
+			return
+		}
+		userID, _ = res.LastInsertId()
 	}
-	userID, _ := res.LastInsertId()
 
 	// Auto-resolve Institution ID from School name if not provided
 	var institutionID *int64 = req.InstitutionID
@@ -340,7 +386,16 @@ func (h *InternHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.RespondCreated(w, "Intern created", map[string]interface{}{"user_id": userID})
+	// Create notification for admins about new intern registration
+	if status == "pending" {
+		_, _ = h.db.Exec(`
+			INSERT INTO notifications (user_id, type, title, message, link, created_at)
+			SELECT u.id, 'info', 'Pendaftaran Magang Baru', ?, '/interns', NOW()
+			FROM users u WHERE u.role = 'admin'
+		`, "Peserta magang baru "+req.FullName+" telah mendaftar dan menunggu persetujuan.")
+	}
+
+	utils.RespondCreated(w, "Intern created. Your account is pending admin approval.", map[string]interface{}{"user_id": userID})
 }
 
 func (h *InternHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +566,25 @@ func (h *InternHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	// Manual Cascade: Delete related data to ensure cleanup
+	// We delete these explicitly to ensure data integrity and not rely solely on DB cascades
+	var deleteQueries = []string{
+		"DELETE FROM attendances WHERE intern_id = ?",
+		"DELETE FROM leave_requests WHERE intern_id = ?",
+		"DELETE FROM assessments WHERE intern_id = ?",
+		"DELETE FROM reports WHERE intern_id = ?",
+		"DELETE FROM certificates WHERE intern_id = ?",
+		"DELETE FROM task_assignment_interns WHERE intern_id = ?",
+		"DELETE FROM tasks WHERE intern_id = ?",
+	}
+
+	for _, query := range deleteQueries {
+		if _, err := tx.Exec(query, internID); err != nil {
+			utils.RespondInternalError(w, "Failed to delete related intern data")
+			return
+		}
+	}
 
 	// Delete user first (cascades to interns via FK ON DELETE CASCADE)
 	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", userID); err != nil {

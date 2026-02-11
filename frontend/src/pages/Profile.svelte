@@ -1,8 +1,8 @@
 <script>
-  import { onMount, onDestroy, tick } from 'svelte';
-  import Chart from 'chart.js/auto';
-  import { api } from '../lib/api.js';
-  import { auth } from '../lib/auth.svelte.js';
+  import { onMount, onDestroy, tick } from "svelte";
+  import Chart from "chart.js/auto";
+  import { api } from "../lib/api.js";
+  import { auth } from "../lib/auth.svelte.js";
 
   let loading = $state(true);
   let error = $state(null);
@@ -16,14 +16,14 @@
     totalTasks: 0,
     attendancePercentage: 0,
     averageSpeed: 0,
-    overallScore: 0
+    overallScore: 0,
   });
 
   let taskStatusData = $state({
     completed: 0,
     in_progress: 0,
     pending: 0,
-    revision: 0
+    revision: 0,
   });
 
   let attendanceData = $state({
@@ -31,7 +31,7 @@
     late: 0,
     absent: 0,
     sick: 0,
-    permission: 0
+    permission: 0,
   });
 
   let assessmentData = $state(null);
@@ -47,17 +47,17 @@
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        position: 'bottom',
+        position: "bottom",
         labels: {
-          color: '#475569',
+          color: "#475569",
           font: { size: 12, weight: 600 },
           usePointStyle: true,
-          padding: 18
-        }
-      }
+          padding: 18,
+        },
+      },
     },
-    cutout: '70%',
-    layout: { padding: 18 }
+    cutout: "70%",
+    layout: { padding: 18 },
   };
 
   onMount(load);
@@ -73,16 +73,23 @@
       const payload = res.data || res;
       user = payload.user || payload;
       intern = payload.intern && payload.intern.id ? payload.intern : null;
-      supervisor = payload.supervisor && payload.supervisor.id ? payload.supervisor : null;
+      supervisor =
+        payload.supervisor && payload.supervisor.id ? payload.supervisor : null;
 
       // Enrich intern details (supervisor name, institution, etc.)
       if (intern?.id) {
         try {
           const detail = await api.getIntern(intern.id);
           const detailData = detail.data || detail;
-          intern = { ...intern, ...detailData, supervisor: detailData.supervisor || null, supervisor_name: detailData.supervisor_name || detailData.SupervisorName };
+          intern = {
+            ...intern,
+            ...detailData,
+            supervisor: detailData.supervisor || null,
+            supervisor_name:
+              detailData.supervisor_name || detailData.SupervisorName,
+          };
         } catch (err) {
-          console.warn('Failed to fetch intern detail', err);
+          console.warn("Failed to fetch intern detail", err);
         }
       }
 
@@ -93,7 +100,7 @@
           const detailData = detail.data?.[0] || detail.data || detail;
           supervisor = { ...supervisor, ...detailData };
         } catch (err) {
-          console.warn('Failed to fetch supervisor detail', err);
+          console.warn("Failed to fetch supervisor detail", err);
         }
       }
 
@@ -104,7 +111,7 @@
       }
     } catch (err) {
       console.error(err);
-      error = err.message || 'Gagal memuat profil';
+      error = err.message || "Gagal memuat profil";
     } finally {
       loading = false;
       await tick();
@@ -120,18 +127,38 @@
 
     try {
       const results = await Promise.allSettled([
-        api.get('/dashboard/intern'),
+        api.get("/dashboard/intern"),
         api.getTasks({ limit: 400 }),
         api.getAttendance({ limit: 400 }),
-        api.getAssessments({ limit: 30 })
+        api.getAssessments({ limit: 30 }),
       ]);
 
-      if (results[0].status === 'fulfilled') dashboardData = results[0].value.data?.data || results[0].value.data || results[0].value;
-      if (results[1].status === 'fulfilled') tasks = results[1].value.data?.data || results[1].value.data || results[1].value || [];
-      if (results[2].status === 'fulfilled') attendance = results[2].value.data?.data || results[2].value.data || results[2].value.records || results[2].value || [];
-      if (results[3].status === 'fulfilled') assessments = results[3].value.data?.data || results[3].value.data || results[3].value || [];
+      if (results[0].status === "fulfilled")
+        dashboardData =
+          results[0].value.data?.data ||
+          results[0].value.data ||
+          results[0].value;
+      if (results[1].status === "fulfilled")
+        tasks =
+          results[1].value.data?.data ||
+          results[1].value.data ||
+          results[1].value ||
+          [];
+      if (results[2].status === "fulfilled")
+        attendance =
+          results[2].value.data?.data ||
+          results[2].value.data ||
+          results[2].value.records ||
+          results[2].value ||
+          [];
+      if (results[3].status === "fulfilled")
+        assessments =
+          results[3].value.data?.data ||
+          results[3].value.data ||
+          results[3].value ||
+          [];
     } catch (err) {
-      console.warn('Partial profile metrics failed:', err);
+      console.warn("Partial profile metrics failed:", err);
     }
 
     deriveStats({ tasks, attendance, assessments, dashboard: dashboardData });
@@ -143,54 +170,77 @@
     const assessmentsArr = Array.isArray(assessments) ? assessments : [];
 
     const totalTasks = tasksArr.length;
-    const completedTasks = tasksArr.filter((t) => t.status === 'completed').length;
-    const inProgress = tasksArr.filter((t) => t.status === 'in_progress').length;
-    const pending = tasksArr.filter((t) => t.status === 'pending').length;
-    const revision = tasksArr.filter((t) => t.status === 'revision').length;
+    const completedTasks = tasksArr.filter(
+      (t) => t.status === "completed",
+    ).length;
+    const inProgress = tasksArr.filter(
+      (t) => t.status === "in_progress",
+    ).length;
+    const pending = tasksArr.filter((t) => t.status === "pending").length;
+    const revision = tasksArr.filter((t) => t.status === "revision").length;
 
-    const completedArr = tasksArr.filter((t) => t.status === 'completed');
+    const completedArr = tasksArr.filter((t) => t.status === "completed");
     const onTime = completedArr.filter(
       (t) =>
         t.is_late === false ||
         t.is_late === 0 ||
         t.is_late === null ||
-        t.is_late === undefined
+        t.is_late === undefined,
     );
-    const averageSpeed = dashboard?.task_stats?.percentage ?? (completedTasks
-      ? Math.round((onTime.length / completedArr.length) * 100)
-      : 0);
+    const averageSpeed =
+      dashboard?.task_stats?.percentage ??
+      (completedTasks
+        ? Math.round((onTime.length / completedArr.length) * 100)
+        : 0);
 
-    const present = attendanceArr.filter((a) => a.status === 'present').length;
-    const late = attendanceArr.filter((a) => a.status === 'late').length;
-    const absent = attendanceArr.filter((a) => a.status === 'absent').length;
-    const sick = attendanceArr.filter((a) => a.status === 'sick').length;
-    const permission = attendanceArr.filter((a) => a.status === 'permission').length;
+    const present = attendanceArr.filter((a) => a.status === "present").length;
+    const late = attendanceArr.filter((a) => a.status === "late").length;
+    const absent = attendanceArr.filter((a) => a.status === "absent").length;
+    const sick = attendanceArr.filter((a) => a.status === "sick").length;
+    const permission = attendanceArr.filter(
+      (a) => a.status === "permission",
+    ).length;
     const attTotal = attendanceArr.length || 1;
     const attendancePercentage =
-      dashboard?.attendance_percentage ?? Math.round(((present + late) / attTotal) * 100);
+      dashboard?.attendance_percentage ??
+      Math.round(((present + late) / attTotal) * 100);
 
     const radar = buildAssessmentRadar(assessmentsArr);
 
-    const tasksWithScores = tasksArr.filter((t) => t.score !== null && t.score !== undefined && t.score !== '');
+    const tasksWithScores = tasksArr.filter(
+      (t) => t.score !== null && t.score !== undefined && t.score !== "",
+    );
     const taskAverageScore = tasksWithScores.length
-      ? Math.round(tasksWithScores.reduce((acc, t) => acc + Number(t.score), 0) / tasksWithScores.length)
+      ? Math.round(
+          tasksWithScores.reduce((acc, t) => acc + Number(t.score), 0) /
+            tasksWithScores.length,
+        )
       : 0;
 
     stats = {
-      completedTasks: dashboard?.task_stats?.completed ?? dashboard?.completed ?? completedTasks,
-      totalTasks: dashboard?.task_stats?.total ?? dashboard?.total ?? totalTasks,
+      completedTasks:
+        dashboard?.task_stats?.completed ??
+        dashboard?.completed ??
+        completedTasks,
+      totalTasks:
+        dashboard?.task_stats?.total ?? dashboard?.total ?? totalTasks,
       attendancePercentage,
       averageSpeed,
-      overallScore: taskAverageScore
+      overallScore: taskAverageScore,
     };
     taskStatusData = dashboard?.task_breakdown
       ? {
           completed: dashboard.task_breakdown.completed ?? 0,
           in_progress: dashboard.task_breakdown.in_progress ?? 0,
           pending: dashboard.task_breakdown.pending ?? 0,
-          revision: dashboard.task_breakdown.revision ?? 0
+          revision: dashboard.task_breakdown.revision ?? 0,
         }
-      : { completed: completedTasks, in_progress: inProgress, pending, revision };
+      : {
+          completed: completedTasks,
+          in_progress: inProgress,
+          pending,
+          revision,
+        };
     attendanceData = { present, late, absent, sick, permission };
     assessmentData = radar;
   }
@@ -198,18 +248,18 @@
   function buildAssessmentRadar(list = []) {
     if (!list.length) return null;
     const keys = [
-      'quality_score',
-      'speed_score',
-      'initiative_score',
-      'teamwork_score',
-      'communication_score'
+      "quality_score",
+      "speed_score",
+      "initiative_score",
+      "teamwork_score",
+      "communication_score",
     ];
     const labelMap = {
-      quality_score: 'Kualitas',
-      speed_score: 'Kecepatan',
-      initiative_score: 'Inisiatif',
-      teamwork_score: 'Kerjasama',
-      communication_score: 'Komunikasi'
+      quality_score: "Kualitas",
+      speed_score: "Kecepatan",
+      initiative_score: "Inisiatif",
+      teamwork_score: "Kerjasama",
+      communication_score: "Komunikasi",
     };
 
     const sum = {};
@@ -248,31 +298,31 @@
 
     if (taskChartEl) {
       taskChart = new Chart(taskChartEl, {
-        type: 'doughnut',
+        type: "doughnut",
         data: {
-          labels: ['Selesai', 'Proses', 'Menunggu', 'Revisi'],
+          labels: ["Selesai", "Proses", "Menunggu", "Revisi"],
           datasets: [
             {
               data: [
                 taskStatusData.completed,
                 taskStatusData.in_progress,
                 taskStatusData.pending,
-                taskStatusData.revision
+                taskStatusData.revision,
               ],
-              backgroundColor: ['#10b981', '#6366f1', '#94a3b8', '#f59e0b'],
-              borderWidth: 0
-            }
-          ]
+              backgroundColor: ["#10b981", "#6366f1", "#94a3b8", "#f59e0b"],
+              borderWidth: 0,
+            },
+          ],
         },
-        options: chartOptions
+        options: chartOptions,
       });
     }
 
     if (attendanceChartEl) {
       attendanceChart = new Chart(attendanceChartEl, {
-        type: 'doughnut',
+        type: "doughnut",
         data: {
-          labels: ['Hadir', 'Telat', 'Absen', 'Sakit', 'Izin'],
+          labels: ["Hadir", "Telat", "Absen", "Sakit", "Izin"],
           datasets: [
             {
               data: [
@@ -280,32 +330,38 @@
                 attendanceData.late,
                 attendanceData.absent,
                 attendanceData.sick,
-                attendanceData.permission
+                attendanceData.permission,
               ],
-              backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#6366f1'],
-              borderWidth: 0
-            }
-          ]
+              backgroundColor: [
+                "#10b981",
+                "#f59e0b",
+                "#ef4444",
+                "#06b6d4",
+                "#6366f1",
+              ],
+              borderWidth: 0,
+            },
+          ],
         },
-        options: chartOptions
+        options: chartOptions,
       });
     }
 
     if (assessmentData && radarChartEl) {
       radarChart = new Chart(radarChartEl, {
-        type: 'radar',
+        type: "radar",
         data: {
           labels: assessmentData.labels,
           datasets: [
             {
-              label: 'Skor Rata-rata',
+              label: "Skor Rata-rata",
               data: assessmentData.values,
-              backgroundColor: 'rgba(99, 102, 241, 0.2)',
-              borderColor: 'rgba(99, 102, 241, 1)',
+              backgroundColor: "rgba(99, 102, 241, 0.2)",
+              borderColor: "rgba(99, 102, 241, 1)",
               borderWidth: 2,
-              pointBackgroundColor: 'rgba(99, 102, 241, 1)'
-            }
-          ]
+              pointBackgroundColor: "rgba(99, 102, 241, 1)",
+            },
+          ],
         },
         options: {
           responsive: true,
@@ -314,17 +370,21 @@
             r: {
               beginAtZero: true,
               max: 100,
-              grid: { color: 'rgba(148, 163, 184, 0.25)' },
-              angleLines: { color: 'rgba(148, 163, 184, 0.25)' },
+              grid: { color: "rgba(148, 163, 184, 0.25)" },
+              angleLines: { color: "rgba(148, 163, 184, 0.25)" },
               pointLabels: {
                 font: { size: 12, weight: 600 },
-                color: '#475569'
+                color: "#475569",
               },
-              ticks: { backdropColor: 'transparent', color: '#94a3b8', stepSize: 20 }
-            }
+              ticks: {
+                backdropColor: "transparent",
+                color: "#94a3b8",
+                stepSize: 20,
+              },
+            },
           },
-          plugins: { legend: { display: false } }
-        }
+          plugins: { legend: { display: false } },
+        },
       });
     }
   }
@@ -337,17 +397,21 @@
   }
 
   function formatDate(dateStr) {
-    if (!dateStr) return '-';
+    if (!dateStr) return "-";
     const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return '-';
-    return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+    if (isNaN(d.getTime())) return "-";
+    return d.toLocaleDateString("id-ID", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
   }
 
   function daysBetween(startStr, endStr) {
-    if (!startStr || !endStr) return '-';
+    if (!startStr || !endStr) return "-";
     const start = new Date(startStr);
     const end = new Date(endStr);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) return '-';
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return "-";
     const diffMs = end.getTime() - start.getTime();
     return Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24)));
   }
@@ -356,95 +420,132 @@
     if (!endStr) return null;
     const end = new Date(endStr);
     if (isNaN(end.getTime())) return null;
-    const diff = Math.round((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    const diff = Math.round(
+      (end.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+    );
     return diff;
   }
 
   function statusBadge(status) {
-    if (status === 'active') return { text: 'Aktif', cls: 'badge-success' };
-    if (status === 'completed') return { text: 'Selesai', cls: 'badge-primary' };
-    if (status === 'cancelled') return { text: 'Dibatalkan', cls: 'badge-danger' };
-    return { text: status || '-', cls: 'badge-muted' };
+    if (status === "active") return { text: "Aktif", cls: "badge-success" };
+    if (status === "completed")
+      return { text: "Selesai", cls: "badge-primary" };
+    if (status === "cancelled")
+      return { text: "Dibatalkan", cls: "badge-danger" };
+    return { text: status || "-", cls: "badge-muted" };
   }
 
   function avatarUrl(path) {
     if (!path) return null;
-    if (path.startsWith('http')) return path;
-    const base = path.startsWith('/uploads/') ? path : `/uploads/${path}`;
+    if (path.startsWith("http")) return path;
+    const base = path.startsWith("/uploads/") ? path : `/uploads/${path}`;
     const qs = [];
     if (auth.token) qs.push(`token=${auth.token}`);
     qs.push(`t=${Date.now()}`);
-    return `${base}${base.includes('?') ? '&' : '?'}${qs.join('&')}`;
+    return `${base}${base.includes("?") ? "&" : "?"}${qs.join("&")}`;
   }
 
-  const isSupervisor = $derived(user?.role === 'supervisor' || user?.role === 'pembimbing');
+  const isSupervisor = $derived(
+    user?.role === "supervisor" || user?.role === "pembimbing",
+  );
 
   const personalInfo = $derived(
     intern
       ? [
-          { label: 'NIS/NIM', value: intern.nis || intern.student_id || intern.nim || '-' },
-          { label: 'Asal Sekolah', value: intern.school || '-' },
-          { label: 'Jurusan', value: intern.department || '-' },
-          { label: 'No. Telepon', value: intern.phone || '-' },
-          { label: 'Alamat', value: intern.address || '-' },
-          { label: 'Pembimbing', value: intern.supervisor_name || (intern.supervisor?.full_name || intern.supervisor?.name) || '-' },
-          { label: 'Institusi', value: intern.institution_name || (typeof intern.institution === 'string' ? intern.institution : intern.institution?.name) || '-' }
+          {
+            label: "NIS/NIM",
+            value: intern.nis || intern.student_id || intern.nim || "-",
+          },
+          { label: "Asal Sekolah", value: intern.school || "-" },
+          { label: "Jurusan", value: intern.department || "-" },
+          { label: "No. Telepon", value: intern.phone || "-" },
+          { label: "Alamat", value: intern.address || "-" },
+          {
+            label: "Pembimbing",
+            value:
+              intern.supervisor_name ||
+              intern.supervisor?.full_name ||
+              intern.supervisor?.name ||
+              "-",
+          },
+          {
+            label: "Institusi",
+            value:
+              intern.institution_name ||
+              (typeof intern.institution === "string"
+                ? intern.institution
+                : intern.institution?.name) ||
+              "-",
+          },
         ]
       : [
-          { label: 'Nama', value: user?.name },
-          { label: 'Email', value: user?.email },
-          { label: 'Role', value: user?.role },
-          { label: 'Bergabung', value: formatDate(user?.created_at) }
-        ]
+          { label: "Nama", value: user?.name },
+          { label: "Email", value: user?.email },
+          { label: "Role", value: user?.role },
+          { label: "Bergabung", value: formatDate(user?.created_at) },
+        ],
   );
 
   const magangInfo = $derived(
     intern
       ? [
-          { label: 'Periode', value: `${formatDate(intern.start_date)} - ${formatDate(intern.end_date)}` },
-          { label: 'Durasi', value: `${daysBetween(intern.start_date, intern.end_date)} Hari` },
           {
-            label: 'Sisa Waktu',
+            label: "Periode",
+            value: `${formatDate(intern.start_date)} - ${formatDate(intern.end_date)}`,
+          },
+          {
+            label: "Durasi",
+            value: `${daysBetween(intern.start_date, intern.end_date)} Hari`,
+          },
+          {
+            label: "Sisa Waktu",
             value: (() => {
               const left = remainingDays(intern.end_date);
-              if (left === null) return '-';
-              if (left < 0) return 'Telah Berakhir';
+              if (left === null) return "-";
+              if (left < 0) return "Telah Berakhir";
               return `${left} Hari Lagi`;
-            })()
+            })(),
           },
-          { label: 'Status', value: statusBadge(intern.status).text }
+          { label: "Status", value: statusBadge(intern.status).text },
         ]
       : [
-          { label: 'Peran', value: user?.role },
-          { label: 'Status', value: 'Aktif' },
-          { label: 'Bergabung', value: formatDate(user?.created_at) },
-          { label: 'Institusi', value: user?.institution_name || '-' }
-        ]
+          { label: "Peran", value: user?.role },
+          { label: "Status", value: "Aktif" },
+          { label: "Bergabung", value: formatDate(user?.created_at) },
+          { label: "Institusi", value: user?.institution_name || "-" },
+        ],
   );
 
   function displayValue(val) {
-    if (val === undefined || val === null) return '-';
+    if (val === undefined || val === null) return "-";
     if (val instanceof Date) return formatDate(val.toISOString());
-    if (typeof val === 'object') {
+    if (typeof val === "object") {
       if (val.full_name) return String(val.full_name);
       if (val.name) return String(val.name);
       if (val.title) return String(val.title);
-      const firstString = Object.values(val).find((v) => typeof v === 'string');
-      return firstString ? String(firstString) : '-';
+      const firstString = Object.values(val).find((v) => typeof v === "string");
+      return firstString ? String(firstString) : "-";
     }
-    if (val === '') return '-';
+    if (val === "") return "-";
     return String(val);
   }
 </script>
 
 <svelte:head>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link
+    rel="preconnect"
+    href="https://fonts.gstatic.com"
+    crossorigin="anonymous"
+  />
   <link
     href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet"
   />
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@48,300,0,0" />
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@48,300,0,0"
+  />
 </svelte:head>
 
 <div class="page">
@@ -454,7 +555,7 @@
         <!-- <h1>Profil Saya</h1> -->
       </div>
       <!-- <div class="actions"> -->
-        <!-- <a class="btn ghost" href="/dashboard">Kembali</a> -->
+      <!-- <a class="btn ghost" href="/dashboard">Kembali</a> -->
       <!-- </div> -->
     </header>
 
@@ -473,9 +574,15 @@
         <div class="hero-left">
           <div class="avatar">
             {#if avatarUrl(user?.avatar)}
-              <img src={avatarUrl(user?.avatar)} alt="avatar" referrerpolicy="no-referrer" />
+              <img
+                src={avatarUrl(user?.avatar)}
+                alt="avatar"
+                referrerpolicy="no-referrer"
+              />
             {:else}
-              <div class="avatar-placeholder">{user?.name?.[0]?.toUpperCase() || 'U'}</div>
+              <div class="avatar-placeholder">
+                {user?.name?.[0]?.toUpperCase() || "U"}
+              </div>
             {/if}
           </div>
           <div>
@@ -500,8 +607,8 @@
             <p class="muted">Bergabung sejak</p>
             <p class="muted-bold">{formatDate(user?.created_at)}</p>
           </div>
-                <!-- <div class="actions"> -->
-                  <a class="btn ghost" href="/profile/edit">Edit Profil</a>
+          <!-- <div class="actions"> -->
+          <a class="btn ghost" href="/profile/edit">Edit Profil</a>
         </div>
       </div>
 
@@ -514,22 +621,32 @@
               {stats.completedTasks}
               <span class="stat-sub">/ {stats.totalTasks}</span>
             </div>
-            <div class="progress"><div style={`width:${stats.totalTasks ? (stats.completedTasks / stats.totalTasks) * 100 : 0}%`}></div></div>
+            <div class="progress">
+              <div
+                style={`width:${stats.totalTasks ? (stats.completedTasks / stats.totalTasks) * 100 : 0}%`}
+              ></div>
+            </div>
           </div>
           <div class="stat-card green">
             <div class="stat-label">Kehadiran</div>
             <div class="stat-value">{stats.attendancePercentage}%</div>
-            <div class="progress"><div style={`width:${stats.attendancePercentage}%`}></div></div>
+            <div class="progress">
+              <div style={`width:${stats.attendancePercentage}%`}></div>
+            </div>
           </div>
           <div class="stat-card sky">
             <div class="stat-label">Kecepatan</div>
             <div class="stat-value">{stats.averageSpeed}%</div>
-            <div class="progress"><div style={`width:${Math.min(stats.averageSpeed, 100)}%`}></div></div>
+            <div class="progress">
+              <div style={`width:${Math.min(stats.averageSpeed, 100)}%`}></div>
+            </div>
           </div>
           <div class="stat-card amber">
             <div class="stat-label">Skor Rata-rata</div>
             <div class="stat-value">{stats.overallScore}</div>
-            <div class="progress"><div style={`width:${Math.min(stats.overallScore, 100)}%`}></div></div>
+            <div class="progress">
+              <div style={`width:${Math.min(stats.overallScore, 100)}%`}></div>
+            </div>
           </div>
         </div>
 
@@ -566,7 +683,6 @@
             </div>
           </div>
         {/if}
-
       {/if}
 
       {#if intern || isSupervisor}
@@ -588,7 +704,7 @@
 
           <div class="card">
             <div class="card-head">
-              <h3>{intern ? 'Informasi Magang' : 'Informasi Tambahan'}</h3>
+              <h3>{intern ? "Informasi Magang" : "Informasi Tambahan"}</h3>
             </div>
             <div class="detail-list">
               {#each magangInfo as item}
@@ -606,10 +722,26 @@
             <h3>Informasi Akun</h3>
           </div>
           <div class="detail-list">
-            <div class="detail-row"><span class="detail-label">Nama</span><span class="detail-value">{displayValue(user?.name)}</span></div>
-            <div class="detail-row"><span class="detail-label">Email</span><span class="detail-value">{displayValue(user?.email)}</span></div>
-            <div class="detail-row"><span class="detail-label">Role</span><span class="detail-value">{displayValue(user?.role)}</span></div>
-            <div class="detail-row"><span class="detail-label">Dibuat</span><span class="detail-value">{formatDate(user?.created_at)}</span></div>
+            <div class="detail-row">
+              <span class="detail-label">Nama</span><span class="detail-value"
+                >{displayValue(user?.name)}</span
+              >
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Email</span><span class="detail-value"
+                >{displayValue(user?.email)}</span
+              >
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Role</span><span class="detail-value"
+                >{displayValue(user?.role)}</span
+              >
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Dibuat</span><span class="detail-value"
+                >{formatDate(user?.created_at)}</span
+              >
+            </div>
           </div>
         </div>
       {/if}
@@ -619,17 +751,22 @@
 
 <style>
   :global(body) {
-    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
+    font-family:
+      "Plus Jakarta Sans",
+      "Inter",
+      system-ui,
+      -apple-system,
+      sans-serif;
     background: #f8fafc;
     color: #0f172a;
   }
 
   .page {
     min-height: 100vh;
-    background:
-      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.06) 0, transparent 45%),
+    /* background: */
+    /* radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.06) 0, transparent 45%),
       radial-gradient(at 100% 20%, rgba(16, 185, 129, 0.07) 0, transparent 35%),
-      #f8fafc;
+      #f8fafc; */
     padding: 0px;
   }
 
@@ -639,6 +776,7 @@
     display: flex;
     flex-direction: column;
     gap: 20px;
+    padding-top: 0s !important;
   }
 
   .header {
@@ -677,12 +815,15 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    transition:
+      transform 0.12s ease,
+      box-shadow 0.12s ease,
+      background 0.12s ease;
     font-size: 14px;
   }
 
   .btn.primary {
-    color:oklch(12.9% 0.042 264.695);
+    color: oklch(12.9% 0.042 264.695);
     background: oklch(96.8% 0.007 247.896);
     border-color: oklch(82.3% 0.034 264.695);
     /* box-shadow: 0 10px 30px rgba(16, 185, 129, 0.25); */
@@ -726,8 +867,12 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 22px;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(16, 185, 129, 0.08));
+    /* padding: 22px; */
+    background: linear-gradient(
+      135deg,
+      rgba(99, 102, 241, 0.08),
+      rgba(16, 185, 129, 0.08)
+    );
   }
 
   .hero-left {
@@ -743,11 +888,10 @@
   }
 
   .hero-right .btn {
-  grid-column: 1 / -1;   /* span full width */
-  /* center horizontally */
-  align-self: center;    /* center vertically */
-}
-
+    grid-column: 1 / -1; /* span full width */
+    /* center horizontally */
+    align-self: center; /* center vertically */
+  }
 
   .avatar {
     width: 78px;
@@ -773,37 +917,37 @@
     font-weight: 800;
   }
 
-  @media (max-width: 800px){
+  @media (max-width: 900px) {
     .joined {
-    display: flex;
-    gap: 6px;
-    align-items: baseline;
-    justify-content: center;
-    text-align: center;
-    white-space: nowrap;
-    margin-top: 8px;
-  }
+      display: flex;
+      gap: 6px;
+      align-items: baseline;
+      justify-content: center;
+      text-align: center;
+      white-space: nowrap;
+      margin-top: 8px;
+    }
   }
 
   .joined .muted {
     margin: 0;
   }
 
-  @media (max-width: 640px) {
-  .hero-right {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-  }
+  @media (max-width: 900px) {
+    .hero-right {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
   }
 
-  @media (max-width: 640px) {
-  .hero-right .btn {
-    width: 100%;
-    justify-content: center;
+  @media (max-width: 900px) {
+    .hero-right .btn {
+      width: 100%;
+      justify-content: center;
+    }
   }
-}
 
   .muted {
     color: #64748b;
@@ -913,10 +1057,14 @@
   }
 
   .stat-card::after {
-    content: '';
+    content: "";
     position: absolute;
     inset: 0;
-    background: radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.6), transparent 55%);
+    background: radial-gradient(
+      circle at 80% 20%,
+      rgba(255, 255, 255, 0.6),
+      transparent 55%
+    );
     pointer-events: none;
   }
 

@@ -23,9 +23,6 @@ type AttendanceHandler struct {
 }
 
 // local wrapper to keep existing calls
-func normalizeRole(role string) string {
-	return middleware.NormalizeRole(role)
-}
 
 var holidayCache = struct {
 	mu   sync.RWMutex
@@ -386,6 +383,16 @@ func (h *AttendanceHandler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	attendanceID, _ := result.LastInsertId()
+
+	if status == "late" {
+		// Notify Supervisor
+		var supervisorID sql.NullInt64
+		_ = h.db.QueryRow("SELECT supervisor_id FROM interns WHERE id = ?", internID).Scan(&supervisorID)
+		if supervisorID.Valid {
+			_ = createNotification(h.db, supervisorID.Int64, models.NotificationAttendanceLate, "Keterlambatan Intern",
+				"Intern terlambat check-in. Alasan: "+req.Reason, "/attendance/"+strconv.FormatInt(attendanceID, 10), nil)
+		}
+	}
 
 	utils.RespondSuccess(w, "Check-in successful", map[string]interface{}{
 		"attendance_id": attendanceID,
@@ -797,6 +804,59 @@ func (h *AttendanceHandler) GetByInternID(w http.ResponseWriter, r *http.Request
 	q.Set("intern_id", strconv.FormatInt(internID, 10))
 	r.URL.RawQuery = q.Encode()
 	h.GetAll(w, r)
+}
+
+func (h *AttendanceHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.GetUserFromContext(r.Context())
+	if !ok {
+		utils.RespondUnauthorized(w, "Unauthorized")
+		return
+	}
+
+	vars := mux.Vars(r)
+	id, _ := strconv.ParseInt(vars["id"], 10, 64)
+
+	// Check if attendance exists
+	var internID int64
+	err := h.db.QueryRow("SELECT intern_id FROM attendances WHERE id = ?", id).Scan(&internID)
+	if err == sql.ErrNoRows {
+		utils.RespondNotFound(w, "Attendance record not found")
+		return
+	}
+	if err != nil {
+		utils.RespondInternalError(w, "Database error")
+		return
+	}
+
+	// Permission check: Admin/Supervisor can delete any. Intern can delete ONLY their own (if logic allows).
+	// For strictness, let's say:
+	// - Admin/Supervisor: OK
+	// - Intern: OK if it belongs to them.
+	role := normalizeRole(claims.Role)
+	if role == "intern" {
+		var myInternID int64
+		if err := h.db.QueryRow("SELECT id FROM interns WHERE user_id = ?", claims.UserID).Scan(&myInternID); err != nil {
+			utils.RespondInternalError(w, "Failed to verify intern identity")
+			return
+		}
+		if myInternID != internID {
+			utils.RespondForbidden(w, "You are not authorized to delete this attendance record")
+			return
+		}
+	} else if role != "admin" && role != "supervisor" && role != "pembimbing" {
+		// Just in case other roles exist
+		utils.RespondForbidden(w, "Unauthorized action")
+		return
+	}
+
+	// Perform Delete
+	_, err = h.db.Exec("DELETE FROM attendances WHERE id = ?", id)
+	if err != nil {
+		utils.RespondInternalError(w, "Failed to delete attendance record")
+		return
+	}
+
+	utils.RespondSuccess(w, "Attendance record deleted successfully", nil)
 }
 
 // SubmitPermission handles sick/permission attendance submission

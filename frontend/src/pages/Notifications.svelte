@@ -1,6 +1,6 @@
 <script>
-  import { onMount } from 'svelte';
-  import { api } from '../lib/api.js';
+  import { onMount } from "svelte";
+  import { api } from "../lib/api.js";
 
   let notifications = $state([]);
   let loading = $state(false);
@@ -31,12 +31,16 @@
 </script>
 
 <div class="card" style="margin-bottom:16px;">
-  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+  <div
+    style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;"
+  >
     <div>
       <h3>Notifikasi</h3>
       <p class="text-muted">Kelola notifikasi dan pembaruan terbaru.</p>
     </div>
-    <button class="btn btn-outline" onclick={markAll}>Tandai Semua Dibaca</button>
+    <button class="btn btn-outline" onclick={markAll}
+      >Tandai Semua Dibaca</button
+    >
   </div>
 </div>
 
@@ -60,8 +64,10 @@
             <td>{n.title}</td>
             <td>{n.message}</td>
             <td>
-              {#if !n.read_at}
-                <button class="btn btn-ghost" onclick={() => markRead(n.id)}>Tandai dibaca</button>
+              {#if !n.is_read}
+                <button class="btn btn-ghost" onclick={() => markRead(n.id)}
+                  >Tandai dibaca</button
+                >
               {/if}
             </td>
           </tr>

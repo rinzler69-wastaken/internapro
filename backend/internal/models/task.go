@@ -14,8 +14,9 @@ type Task struct {
 	AssignedBy       int64            `json:"assigned_by"` // user_id (admin/pembimbing)
 	Title            string           `json:"title"`
 	Description      *string          `json:"description,omitempty"`
-	Priority         string           `json:"priority"` // low, medium, high
-	Status           string           `json:"status"`   // pending, scheduled, in_progress, submitted, revision, completed
+	SubmissionMethod *string          `json:"submission_method,omitempty"` // links, files, both
+	Priority         string           `json:"priority"`                    // low, medium, high
+	Status           string           `json:"status"`                      // pending, scheduled, in_progress, submitted, revision, completed
 	StartDate        *time.Time       `json:"start_date,omitempty"`
 	Deadline         *time.Time       `json:"deadline,omitempty"`
 	DeadlineTime     *string          `json:"deadline_time,omitempty"` // HH:MM:SS
@@ -26,6 +27,7 @@ type Task struct {
 	IsLate           bool             `json:"is_late"`
 	SubmissionNotes  *string          `json:"submission_notes,omitempty"`
 	SubmissionLinks  []SubmissionLink `json:"submission_links,omitempty"`
+	SubmissionFile   *string          `json:"submission_file,omitempty"`
 	Score            *int             `json:"score,omitempty"`
 	AdminFeedback    *string          `json:"admin_feedback,omitempty"`
 	CreatedAt        time.Time        `json:"created_at"`
@@ -37,17 +39,17 @@ type Task struct {
 }
 
 type TaskAssignment struct {
-	ID           int64       `json:"id"`
-	Title        string      `json:"title"`
-	Description  *string     `json:"description,omitempty"`
-	AssignedBy   int64       `json:"assigned_by"`
-	Priority     string      `json:"priority"`
-	StartDate    *time.Time  `json:"start_date,omitempty"`
-	Deadline     *time.Time  `json:"deadline,omitempty"`
-	DeadlineTime *string     `json:"deadline_time,omitempty"`
-	AssignToAll  bool        `json:"assign_to_all"`
-	CreatedAt    time.Time   `json:"created_at"`
-	UpdatedAt    time.Time   `json:"updated_at"`
+	ID           int64      `json:"id"`
+	Title        string     `json:"title"`
+	Description  *string    `json:"description,omitempty"`
+	AssignedBy   int64      `json:"assigned_by"`
+	Priority     string     `json:"priority"`
+	StartDate    *time.Time `json:"start_date,omitempty"`
+	Deadline     *time.Time `json:"deadline,omitempty"`
+	DeadlineTime *string    `json:"deadline_time,omitempty"`
+	AssignToAll  bool       `json:"assign_to_all"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 
 	AssignedByName string `json:"assigned_by_name,omitempty"`
 	TasksCount     int    `json:"tasks_count,omitempty"`

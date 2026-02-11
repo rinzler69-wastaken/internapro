@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"net/http"
 	"strconv"
-	"time"
 
 	"dsi_interna_sys/internal/middleware"
 	"dsi_interna_sys/internal/models"
@@ -39,20 +38,33 @@ func (h *NotificationHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 
 	var total int64
-	if err := h.db.QueryRow("SELECT COUNT(*) FROM notifications WHERE user_id = ?", claims.UserID).Scan(&total); err != nil {
-		// Fail-soft: return empty list instead of 500 so UI keeps working
+	queryCount := "SELECT COUNT(*) FROM notifications WHERE user_id = ?"
+	queryData := `SELECT id, user_id, type, title, message, icon, link, is_read, created_at 
+	             FROM notifications WHERE user_id = ?`
+
+	isReadParam := r.URL.Query().Get("is_read")
+	var argsCount []interface{}
+	var argsData []interface{}
+	argsCount = append(argsCount, claims.UserID)
+	argsData = append(argsData, claims.UserID)
+
+	if isReadParam != "" {
+		isRead, _ := strconv.ParseBool(isReadParam)
+		queryCount += " AND is_read = ?"
+		queryData += " AND is_read = ?"
+		argsCount = append(argsCount, isRead)
+		argsData = append(argsData, isRead)
+	}
+
+	if err := h.db.QueryRow(queryCount, argsCount...).Scan(&total); err != nil {
 		utils.RespondPaginated(w, []models.Notification{}, utils.CalculatePagination(page, limit, 0))
 		return
 	}
 
-	rows, err := h.db.Query(
-		`SELECT id, user_id, type, title, message, icon, link, data, read_at, created_at, updated_at
-		 FROM notifications
-		 WHERE user_id = ?
-		 ORDER BY created_at DESC
-		 LIMIT ? OFFSET ?`,
-		claims.UserID, limit, offset,
-	)
+	queryData += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	argsData = append(argsData, limit, offset)
+
+	rows, err := h.db.Query(queryData, argsData...)
 	if err != nil {
 		utils.RespondPaginated(w, []models.Notification{}, utils.CalculatePagination(page, limit, 0))
 		return
@@ -62,7 +74,10 @@ func (h *NotificationHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	var notifications []models.Notification
 	for rows.Next() {
 		var n models.Notification
-		if err := rows.Scan(&n.ID, &n.UserID, &n.Type, &n.Title, &n.Message, &n.Icon, &n.Link, &n.Data, &n.ReadAt, &n.CreatedAt, &n.UpdatedAt); err == nil {
+		var icon, link sql.NullString
+		if err := rows.Scan(&n.ID, &n.UserID, &n.Type, &n.Title, &n.Message, &icon, &link, &n.IsRead, &n.CreatedAt); err == nil {
+			n.Icon = icon.String
+			n.Link = link.String
 			notifications = append(notifications, n)
 		}
 	}
@@ -81,8 +96,8 @@ func (h *NotificationHandler) MarkAsRead(w http.ResponseWriter, r *http.Request)
 	id, _ := strconv.ParseInt(vars["id"], 10, 64)
 
 	res, err := h.db.Exec(
-		"UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ?",
-		time.Now(), id, claims.UserID,
+		"UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?",
+		id, claims.UserID,
 	)
 	if err != nil {
 		utils.RespondInternalError(w, "Failed to update notification")
@@ -105,8 +120,8 @@ func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request
 	}
 
 	if _, err := h.db.Exec(
-		"UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
-		time.Now(), claims.UserID,
+		"UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0",
+		claims.UserID,
 	); err != nil {
 		utils.RespondInternalError(w, "Failed to mark all notifications")
 		return

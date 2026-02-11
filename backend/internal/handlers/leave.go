@@ -110,6 +110,15 @@ func (h *LeaveHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, _ := res.LastInsertId()
+
+	// Notify Supervisor
+	var supervisorID sql.NullInt64
+	_ = h.db.QueryRow("SELECT supervisor_id FROM interns WHERE id = ?", internID).Scan(&supervisorID)
+	if supervisorID.Valid {
+		_ = createNotification(h.db, supervisorID.Int64, "info", "Pengajuan Izin",
+			"Seorang intern mengajukan izin "+leaveType+".", "/leaves", nil)
+	}
+
 	utils.RespondCreated(w, "Leave request submitted successfully", map[string]int64{"id": id})
 }
 
@@ -197,6 +206,21 @@ func (h *LeaveHandler) updateStatus(w http.ResponseWriter, r *http.Request, stat
 	if err != nil {
 		utils.RespondInternalError(w, "Failed to update status")
 		return
+	}
+
+	// Notify Intern
+	var internUserID int64
+	err = h.db.QueryRow(
+		`SELECT i.user_id FROM leave_requests l
+		 JOIN interns i ON l.intern_id = i.id
+		 WHERE l.id = ?`, id,
+	).Scan(&internUserID)
+	if err == nil {
+		message := "Pengajuan izin Anda telah disetujui."
+		if status == "rejected" {
+			message = "Pengajuan izin Anda ditolak."
+		}
+		_ = createNotification(h.db, internUserID, "info", "Status Izin", message, "/leaves", nil)
 	}
 
 	utils.RespondSuccess(w, "Leave request "+status, nil)

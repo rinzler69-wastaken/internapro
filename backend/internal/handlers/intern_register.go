@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"database/sql"
+	"dsi_interna_sys/internal/models"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -201,7 +203,20 @@ func (h *InternHandler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 6. Response Sukses
+	// 6. Notify Admins
+	rows, err := h.db.Query("SELECT id FROM users WHERE role = 'admin'")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var adminID int64
+			if err := rows.Scan(&adminID); err == nil {
+				_ = createNotification(h.db, adminID, models.NotificationNewIntern, "Registrasi Intern Baru",
+					"Intern baru "+req.Name+" telah mendaftar.", "/interns/"+strconv.FormatInt(userID, 10), nil) // Link to intern profile (might need better link if pending approval page exists)
+			}
+		}
+	}
+
+	// 7. Response Sukses
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{

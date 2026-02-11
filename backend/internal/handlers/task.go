@@ -24,14 +24,15 @@ func NewTaskHandler(db *sql.DB) *TaskHandler {
 }
 
 type createTaskRequest struct {
-	Title        string  `json:"title"`
-	Description  string  `json:"description"`
-	Priority     string  `json:"priority"`      // low, medium, high
-	StartDate    string  `json:"start_date"`    // YYYY-MM-DD
-	Deadline     string  `json:"deadline"`      // YYYY-MM-DD
-	DeadlineTime string  `json:"deadline_time"` // HH:MM
-	AssignTo     string  `json:"assign_to"`     // all, selected
-	InternIDs    []int64 `json:"intern_ids"`
+	Title            string  `json:"title"`
+	Description      string  `json:"description"`
+	SubmissionMethod string  `json:"submission_method"` // links, files, both
+	Priority         string  `json:"priority"`          // low, medium, high
+	StartDate        string  `json:"start_date"`        // YYYY-MM-DD
+	Deadline         string  `json:"deadline"`          // YYYY-MM-DD
+	DeadlineTime     string  `json:"deadline_time"`     // HH:MM
+	AssignTo         string  `json:"assign_to"`         // all, selected
+	InternIDs        []int64 `json:"intern_ids"`
 }
 
 type updateTaskRequest struct {
@@ -145,9 +146,9 @@ func (h *TaskHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `
-		SELECT t.id, t.task_assignment_id, t.intern_id, t.assigned_by, t.title, t.description, t.priority, t.status,
+		SELECT t.id, t.task_assignment_id, t.intern_id, t.assigned_by, t.title, t.description, t.submission_method, t.priority, t.status,
 		       t.start_date, t.deadline, t.deadline_time, t.started_at, t.submitted_at, t.completed_at, t.approved_at,
-		       t.is_late, t.submission_notes, t.submission_links, t.score, t.admin_feedback, t.created_at, t.updated_at,
+		       t.is_late, t.submission_notes, t.submission_links, t.submission_file, t.score, t.admin_feedback, t.created_at, t.updated_at,
 		       iu.name, au.name
 	` + baseFrom + " " + whereClause + " ORDER BY t.created_at DESC LIMIT ? OFFSET ?"
 
@@ -183,9 +184,9 @@ func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(vars["id"], 10, 64)
 
 	query := `
-		SELECT t.id, t.task_assignment_id, t.intern_id, t.assigned_by, t.title, t.description, t.priority, t.status,
+		SELECT t.id, t.task_assignment_id, t.intern_id, t.assigned_by, t.title, t.description, t.submission_method, t.priority, t.status,
 		       t.start_date, t.deadline, t.deadline_time, t.started_at, t.submitted_at, t.completed_at, t.approved_at,
-		       t.is_late, t.submission_notes, t.submission_links, t.score, t.admin_feedback, t.created_at, t.updated_at,
+		       t.is_late, t.submission_notes, t.submission_links, t.submission_file, t.score, t.admin_feedback, t.created_at, t.updated_at,
 		       iu.name, au.name
 		FROM tasks t
 		LEFT JOIN interns i ON t.intern_id = i.id
@@ -261,6 +262,13 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AssignTo != "all" && req.AssignTo != "selected" {
 		utils.RespondBadRequest(w, "Invalid assign_to value")
+		return
+	}
+	if req.SubmissionMethod == "" {
+		req.SubmissionMethod = "both"
+	}
+	if req.SubmissionMethod != "links" && req.SubmissionMethod != "files" && req.SubmissionMethod != "both" {
+		utils.RespondBadRequest(w, "Invalid submission_method")
 		return
 	}
 
@@ -364,9 +372,9 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 
 		taskRes, err := tx.Exec(
-			`INSERT INTO tasks (task_assignment_id, title, description, intern_id, assigned_by, priority, status, start_date, deadline, deadline_time)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			assignmentID, req.Title, nullIfEmpty(req.Description), it.ID, claims.UserID, req.Priority, initialStatus, startDate, deadline, deadlineTime,
+			`INSERT INTO tasks (task_assignment_id, title, description, submission_method, intern_id, assigned_by, priority, status, start_date, deadline, deadline_time)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			assignmentID, req.Title, nullIfEmpty(req.Description), req.SubmissionMethod, it.ID, claims.UserID, req.Priority, initialStatus, startDate, deadline, deadlineTime,
 		)
 		if err != nil {
 			utils.RespondInternalError(w, "Failed to create tasks")
@@ -376,7 +384,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		taskID, _ := taskRes.LastInsertId()
 
 		if !isScheduled {
-			_ = h.createNotification(it.UserID, models.NotificationTaskAssigned, "Tugas Baru: "+req.Title,
+			_ = createNotification(h.db, it.UserID, models.NotificationTaskAssigned, "Tugas Baru: "+req.Title,
 				"Anda mendapat tugas baru. Silakan cek detail tugas Anda.", "/tasks/"+strconv.FormatInt(taskID, 10), map[string]interface{}{"task_id": taskID})
 		}
 	}
@@ -620,25 +628,46 @@ func (h *TaskHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req submitTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.RespondBadRequest(w, "Invalid request body")
-		return
-	}
-	if len(req.Links) == 0 {
-		utils.RespondBadRequest(w, "At least one submission link is required")
-		return
-	}
-	for _, l := range req.Links {
-		if strings.TrimSpace(l.Label) == "" || strings.TrimSpace(l.URL) == "" {
-			utils.RespondBadRequest(w, "Each link must have label and url")
+	var submissionFilePath sql.NullString
+
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			utils.RespondBadRequest(w, "Failed to parse form data")
+			return
+		}
+		req.SubmissionNotes = r.FormValue("submission_notes")
+		linksStr := r.FormValue("links")
+		if linksStr != "" {
+			if err := json.Unmarshal([]byte(linksStr), &req.Links); err != nil {
+				utils.RespondBadRequest(w, "Invalid links format")
+				return
+			}
+		}
+
+		file, header, err := r.FormFile("file")
+		if err == nil {
+			defer file.Close()
+			path, err := utils.UploadFile(file, header, "tasks")
+			if err != nil {
+				utils.RespondInternalError(w, "Upload failed: "+err.Error())
+				return
+			}
+			submissionFilePath = sql.NullString{String: path, Valid: true}
+		}
+	} else {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			utils.RespondBadRequest(w, "Invalid request body")
 			return
 		}
 	}
 
+	// Fetch task submission_method to validate requirements
+	var submissionMethod sql.NullString
 	var deadline sql.NullTime
 	var deadlineTime sql.NullString
-	err = h.db.QueryRow("SELECT deadline, deadline_time FROM tasks WHERE id = ? AND intern_id = ?", taskID, internID).
-		Scan(&deadline, &deadlineTime)
+	err = h.db.QueryRow("SELECT submission_method, deadline, deadline_time FROM tasks WHERE id = ? AND intern_id = ?", taskID, internID).
+		Scan(&submissionMethod, &deadline, &deadlineTime)
 	if err == sql.ErrNoRows {
 		utils.RespondForbidden(w, "You do not have access to this task")
 		return
@@ -648,19 +677,62 @@ func (h *TaskHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	method := "both"
+	if submissionMethod.Valid {
+		method = submissionMethod.String
+	}
+
+	// Validate based on submission method
+	hasLinks := len(req.Links) > 0
+	hasFile := submissionFilePath.Valid
+
+	switch method {
+	case "links":
+		if !hasLinks {
+			utils.RespondBadRequest(w, "Link pengumpulan wajib diisi")
+			return
+		}
+	case "files":
+		if !hasFile {
+			utils.RespondBadRequest(w, "File pengumpulan wajib diunggah")
+			return
+		}
+	case "both":
+		if !hasLinks && !hasFile {
+			utils.RespondBadRequest(w, "Minimal satu link atau file harus diisi")
+			return
+		}
+	}
+
+	for _, l := range req.Links {
+		if strings.TrimSpace(l.Label) == "" || strings.TrimSpace(l.URL) == "" {
+			utils.RespondBadRequest(w, "Each link must have label and url")
+			return
+		}
+	}
+
 	linksJSON, _ := json.Marshal(req.Links)
 	now := time.Now()
 	isLate := h.isLate(deadline, deadlineTime, now)
 
 	_, err = h.db.Exec(
-		`UPDATE tasks SET status = 'submitted', submitted_at = ?, submission_notes = ?, submission_links = ?, is_late = ?,
+		`UPDATE tasks SET status = 'submitted', submitted_at = ?, submission_notes = ?, submission_links = ?, submission_file = ?, is_late = ?,
 		        started_at = COALESCE(started_at, ?)
 		 WHERE id = ?`,
-		now, nullIfEmpty(req.SubmissionNotes), string(linksJSON), isLate, now, taskID,
+		now, nullIfEmpty(req.SubmissionNotes), string(linksJSON), submissionFilePath, isLate, now, taskID,
 	)
 	if err != nil {
 		utils.RespondInternalError(w, "Failed to submit task")
 		return
+	}
+
+	// Notify Supervisor
+	var supervisorID int64
+	err = h.db.QueryRow("SELECT assigned_by FROM tasks WHERE id = ?", taskID).Scan(&supervisorID)
+	if err == nil {
+		_ = createNotification(h.db, supervisorID, models.NotificationTaskSubmitted, "Tugas Dikumpulkan",
+			"Seorang intern telah mengumpulkan tugas. Silakan periksa.", "/tasks/"+strconv.FormatInt(taskID, 10),
+			map[string]interface{}{"task_id": taskID})
 	}
 
 	utils.RespondSuccess(w, "Task submitted", map[string]interface{}{"is_late": isLate})
@@ -720,7 +792,7 @@ func (h *TaskHandler) Review(w http.ResponseWriter, r *http.Request) {
 			utils.RespondInternalError(w, "Failed to approve task")
 			return
 		}
-		_ = h.createNotification(internUserID, models.NotificationTaskApproved, "Tugas Disetujui",
+		_ = createNotification(h.db, internUserID, models.NotificationTaskApproved, "Tugas Disetujui",
 			"Tugas Anda telah disetujui. Nilai: "+strconv.Itoa(*req.Score), "/tasks/"+strconv.FormatInt(taskID, 10),
 			map[string]interface{}{"task_id": taskID, "score": *req.Score})
 	} else {
@@ -733,7 +805,7 @@ func (h *TaskHandler) Review(w http.ResponseWriter, r *http.Request) {
 			utils.RespondInternalError(w, "Failed to request revision")
 			return
 		}
-		_ = h.createNotification(internUserID, models.NotificationTaskRevision, "Perlu Revisi",
+		_ = createNotification(h.db, internUserID, models.NotificationTaskRevision, "Perlu Revisi",
 			"Tugas Anda memerlukan revisi. Silakan cek feedback pembimbing.", "/tasks/"+strconv.FormatInt(taskID, 10),
 			map[string]interface{}{"task_id": taskID})
 	}
@@ -984,9 +1056,9 @@ func (h *TaskHandler) GetAssignmentByID(w http.ResponseWriter, r *http.Request) 
 
 	// Fetch tasks under this assignment
 	rows, err := h.db.Query(
-		`SELECT t.id, t.task_assignment_id, t.intern_id, t.assigned_by, t.title, t.description, t.priority, t.status,
+		`SELECT t.id, t.task_assignment_id, t.intern_id, t.assigned_by, t.title, t.description, t.submission_method, t.priority, t.status,
 		        t.start_date, t.deadline, t.deadline_time, t.started_at, t.submitted_at, t.completed_at, t.approved_at,
-		        t.is_late, t.submission_notes, t.submission_links, t.score, t.admin_feedback, t.created_at, t.updated_at,
+		        t.is_late, t.submission_notes, t.submission_links, t.submission_file, t.score, t.admin_feedback, t.created_at, t.updated_at,
 		        iu.name, au.name
 		 FROM tasks t
 		 LEFT JOIN interns i ON t.intern_id = i.id
@@ -1027,6 +1099,7 @@ func scanTask(scanner sqlScanner) (models.Task, error) {
 	var taskAssignmentID sql.NullInt64
 	var internID sql.NullInt64
 	var description sql.NullString
+	var submissionMethod sql.NullString
 	var startDate sql.NullTime
 	var deadline sql.NullTime
 	var deadlineTime sql.NullString
@@ -1038,13 +1111,14 @@ func scanTask(scanner sqlScanner) (models.Task, error) {
 	var submissionLinks sql.NullString
 	var score sql.NullInt64
 	var adminFeedback sql.NullString
+	var submissionFile sql.NullString
 	var internName sql.NullString
 	var assignedByName sql.NullString
 
 	if err := scanner.Scan(
-		&t.ID, &taskAssignmentID, &internID, &t.AssignedBy, &t.Title, &description, &t.Priority, &t.Status,
+		&t.ID, &taskAssignmentID, &internID, &t.AssignedBy, &t.Title, &description, &submissionMethod, &t.Priority, &t.Status,
 		&startDate, &deadline, &deadlineTime, &startedAt, &submittedAt, &completedAt, &approvedAt,
-		&t.IsLate, &submissionNotes, &submissionLinks, &score, &adminFeedback, &t.CreatedAt, &t.UpdatedAt,
+		&t.IsLate, &submissionNotes, &submissionLinks, &submissionFile, &score, &adminFeedback, &t.CreatedAt, &t.UpdatedAt,
 		&internName, &assignedByName,
 	); err != nil {
 		return t, err
@@ -1053,6 +1127,7 @@ func scanTask(scanner sqlScanner) (models.Task, error) {
 	t.TaskAssignmentID = ptrInt64FromNull(taskAssignmentID)
 	t.InternID = ptrInt64FromNull(internID)
 	t.Description = ptrStringFromNull(description)
+	t.SubmissionMethod = ptrStringFromNull(submissionMethod)
 	t.StartDate = ptrTimeFromNull(startDate)
 	t.Deadline = ptrTimeFromNull(deadline)
 	t.DeadlineTime = ptrStringFromNull(deadlineTime)
@@ -1063,6 +1138,7 @@ func scanTask(scanner sqlScanner) (models.Task, error) {
 	t.SubmissionNotes = ptrStringFromNull(submissionNotes)
 	t.Score = ptrIntFromNull(score)
 	t.AdminFeedback = ptrStringFromNull(adminFeedback)
+	t.SubmissionFile = ptrStringFromNull(submissionFile)
 
 	if submissionLinks.Valid {
 		var links []models.SubmissionLink
@@ -1083,21 +1159,6 @@ func (h *TaskHandler) getInternIDForUser(userID int64) (int64, error) {
 	var internID int64
 	err := h.db.QueryRow("SELECT id FROM interns WHERE user_id = ?", userID).Scan(&internID)
 	return internID, err
-}
-
-func (h *TaskHandler) createNotification(userID int64, ntype, title, message, link string, data map[string]interface{}) error {
-	var dataStr sql.NullString
-	if data != nil {
-		if b, err := json.Marshal(data); err == nil {
-			dataStr = sql.NullString{String: string(b), Valid: true}
-		}
-	}
-	_, err := h.db.Exec(
-		`INSERT INTO notifications (user_id, type, title, message, link, data)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		userID, ntype, title, message, nullIfEmpty(link), dataStr,
-	)
-	return err
 }
 
 func (h *TaskHandler) assignmentStats(assignmentID int64) map[string]interface{} {

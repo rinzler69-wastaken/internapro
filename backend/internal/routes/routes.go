@@ -42,6 +42,7 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	// --- NEW: Route Pendaftaran Magang (Public) ---
 	// Endpoint ini bisa diakses tanpa login untuk pendaftaran mandiri
 	api.HandleFunc("/internship/register", internHandler.Register).Methods("POST")
+	api.HandleFunc("/supervisor/register", supervisorHandler.Register).Methods("POST")
 	api.HandleFunc("/supervisors", supervisorHandler.GetAllPublic).Methods("GET")
 
 	// Protected
@@ -97,8 +98,8 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	protected.HandleFunc("/tasks/{id}", taskHandler.Delete).Methods("DELETE")
 
 	// Task Assignments (grouped)
-	protected.HandleFunc("/task-assignments", taskHandler.GetAssignments).Methods("GET")
-	protected.HandleFunc("/task-assignments/{id}", taskHandler.GetAssignmentByID).Methods("GET")
+	// protected.HandleFunc("/task-assignments", taskHandler.GetAssignments).Methods("GET")
+	// protected.HandleFunc("/task-assignments/{id}", taskHandler.GetAssignmentByID).Methods("GET")
 
 	// Attendance - ORDER IS CRITICAL HERE
 	protected.HandleFunc("/attendance", attendanceHandler.GetAll).Methods("GET")
@@ -108,6 +109,7 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	protected.HandleFunc("/attendance/permission", attendanceHandler.SubmitPermission).Methods("POST")
 	protected.HandleFunc("/attendance/intern/{id}", attendanceHandler.GetByInternID).Methods("GET")
 	protected.HandleFunc("/attendance/{id}", attendanceHandler.GetByID).Methods("GET") // GENERIC LAST
+	protected.HandleFunc("/attendance/{id}", attendanceHandler.Delete).Methods("DELETE")
 
 	// Leaves
 	protected.HandleFunc("/leaves", leaveHandler.GetAll).Methods("GET")
@@ -157,6 +159,9 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	protected.HandleFunc("/notifications/{id}/read", notificationHandler.MarkAsRead).Methods("POST")
 	protected.HandleFunc("/notifications/mark-all-read", notificationHandler.MarkAllRead).Methods("POST")
 	protected.HandleFunc("/notifications/{id}", notificationHandler.Delete).Methods("DELETE")
+
+	// Office Info (all authenticated users can read)
+	protected.HandleFunc("/office-info", settingHandler.GetOfficeInfo).Methods("GET")
 
 	// Settings (admin only)
 	settings := protected.PathPrefix("/settings").Subrouter()

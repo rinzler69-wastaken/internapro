@@ -143,7 +143,7 @@
 </div>
 
 <style>
-  .page-shell { max-width: 1400px; margin: 0 auto; padding: 1rem; }
+  .page-shell { max-width: 1200px; margin: 0 auto; padding: 1rem; }
   .page-header { display:flex; align-items:center; gap:12px; margin-bottom:1rem; }
   .pill-btn { display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border:1px solid #e5e7eb; border-radius:999px; background:#fff; cursor:pointer; font-weight:600; color:#0f172a; }
   .pill-btn:hover { border-color:#cbd5e1; background:#f8fafc; }
@@ -159,7 +159,7 @@
   .badge { padding:6px 10px; border-radius:999px; font-size:0.8rem; font-weight:700; border:1px solid transparent; }
   .link { color:#2563eb; font-weight:600; text-decoration:none; }
   .link:hover { text-decoration:underline; }
-  @media (max-width: 768px) {
+  @media (max-width: 900px) {
     .page-shell { padding: 0.75rem; }
     .card { padding:12px; }
   }

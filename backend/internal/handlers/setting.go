@@ -31,7 +31,7 @@ func ensureSettingsTable(db *sql.DB) error {
 			"description VARCHAR(255)," +
 			"created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
 			"updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" +
-		") ENGINE=InnoDB;",
+			") ENGINE=InnoDB;",
 	)
 	return err
 }
@@ -121,4 +121,49 @@ func (h *SettingHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.RespondSuccess(w, "Settings updated", nil)
+}
+
+// GetOfficeInfo returns read-only office configuration for all authenticated users
+// This allows interns to see office location for the map without access to full settings
+func (h *SettingHandler) GetOfficeInfo(w http.ResponseWriter, r *http.Request) {
+	// Only require authentication, not admin/supervisor role
+	_, ok := middleware.GetUserFromContext(r.Context())
+	if !ok {
+		utils.RespondUnauthorized(w, "Unauthorized")
+		return
+	}
+
+	if err := ensureSettingsTable(h.db); err != nil {
+		log.Printf("settings ensure table failed: %v", err)
+		utils.RespondInternalError(w, "Failed to prepare settings table: "+err.Error())
+		return
+	}
+
+	// Only fetch office-related settings that are safe for interns to see
+	allowedKeys := []string{
+		"office_name",
+		"office_latitude",
+		"office_longitude",
+		"max_checkin_distance",
+		"office_radius", // legacy support
+	}
+
+	query := "SELECT `key`, `value` FROM settings WHERE `key` IN (?, ?, ?, ?, ?)"
+	rows, err := h.db.Query(query, allowedKeys[0], allowedKeys[1], allowedKeys[2], allowedKeys[3], allowedKeys[4])
+	if err != nil {
+		log.Printf("office info query failed: %v", err)
+		utils.RespondInternalError(w, "Failed to fetch office info: "+err.Error())
+		return
+	}
+	defer rows.Close()
+
+	officeInfo := make(map[string]string)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err == nil {
+			officeInfo[key] = value
+		}
+	}
+
+	utils.RespondSuccess(w, "Office info retrieved", officeInfo)
 }

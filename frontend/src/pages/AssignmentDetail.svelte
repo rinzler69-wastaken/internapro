@@ -278,7 +278,7 @@
   .stats-mini-grid {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
   }
-  @media (max-width: 600px) { .stats-mini-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .stats-mini-grid { grid-template-columns: 1fr; } }
 
   .stat-item {
     background: white; border: 1px solid #e2e8f0; border-radius: 16px;

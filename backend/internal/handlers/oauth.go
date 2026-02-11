@@ -12,6 +12,8 @@ import (
 	"dsi_interna_sys/internal/models"
 	"dsi_interna_sys/internal/utils"
 
+	"time"
+
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -129,106 +131,94 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 
 	setupRequired := false
 	if errUser == sql.ErrNoRows {
-		// Unregistered: reject and send to manual registration
-		sendRegisterRedirect(w, r, info.Email, info.Name)
-		return
+		// Auto-register as "new_user"
+		// We insert the user with role 'new_user' and allow them to complete profile later
+		res, err := h.db.Exec(
+			"INSERT INTO users (name, email, role, google_id, provider, avatar, created_at) VALUES (?, ?, 'new_user', ?, 'google', ?, NOW())",
+			info.Name, info.Email, info.ID, info.Picture,
+		)
+		if err != nil {
+			utils.RespondInternalError(w, "Failed to create new user: "+err.Error())
+			return
+		}
+		userID, _ := res.LastInsertId()
+
+		// Fill the user struct for token generation
+		user.ID = userID
+		user.Name = sql.NullString{String: info.Name, Valid: true}
+		user.Email = info.Email
+		user.Role = "new_user"
+		user.Avatar = sql.NullString{String: info.Picture, Valid: true}
+		user.GoogleID = sql.NullString{String: info.ID, Valid: true}
+		user.Provider = sql.NullString{String: "google", Valid: true}
+		user.Is2FAEnabled = false
+		user.CreatedAt = time.Now()
+
+		setupRequired = true // Effectively they need setup (profile completion)
 	} else if errUser != nil {
 		utils.RespondInternalError(w, "Database error")
 		return
 	} else {
 		// Update google_id/provider/avatar if missing
+		updates := []string{}
+		args := []interface{}{}
+
 		if !user.GoogleID.Valid || user.GoogleID.String == "" {
-			_, _ = h.db.Exec("UPDATE users SET google_id = ?, provider = 'google' WHERE id = ?", info.ID, user.ID)
+			updates = append(updates, "google_id = ?")
+			args = append(args, info.ID)
 		}
-		if info.Picture != "" {
-			_, _ = h.db.Exec("UPDATE users SET avatar = ? WHERE id = ?", info.Picture, user.ID)
+		if !user.Provider.Valid || user.Provider.String == "" {
+			updates = append(updates, "provider = 'google'")
+		}
+		// Always update avatar if available from Google
+		if info.Picture != "" && (!user.Avatar.Valid || user.Avatar.String != info.Picture) {
+			updates = append(updates, "avatar = ?")
+			args = append(args, info.Picture)
+		}
+
+		if len(updates) > 0 {
+			query := "UPDATE users SET " + strings.Join(updates, ", ") + " WHERE id = ?"
+			args = append(args, user.ID)
+			_, _ = h.db.Exec(query, args...)
 		}
 	}
 
-	// Block pending intern/supervisor
-	pendingApproval := false
-	role := normalizeRole(user.Role)
-	if role == "intern" {
-		var status string
-		if err := h.db.QueryRow("SELECT status FROM interns WHERE user_id = ?", user.ID).Scan(&status); err == nil {
-			if status == "pending" || status == "" {
-				pendingApproval = true
-			}
-		} else if err == sql.ErrNoRows {
-			// No intern profile exists – treat as unregistered
-			sendRegisterRedirect(w, r, info.Email, info.Name)
-			return
-		}
-	}
-	if role == "pembimbing" {
-		var status string
-		if err := h.db.QueryRow("SELECT status FROM supervisors WHERE user_id = ?", user.ID).Scan(&status); err == nil {
-			if status == "pending" {
-				pendingApproval = true
-			}
-		}
-	}
-
+	// Generate Token
 	jwtToken, err := h.generateToken(&user)
 	if err != nil {
 		utils.RespondInternalError(w, "Failed to generate token")
 		return
 	}
 
-	// optional redirect to frontend
+	// Always redirect to frontend. Frontend determines next step based on user role ("new_user")
 	redirect := r.URL.Query().Get("redirect")
-	if strings.TrimSpace(redirect) != "" {
-		var redirectURL string
-		if pendingApproval {
-			redirectURL = config.Loaded.OAuth.FrontendURL + "/waiting-approval"
-		} else {
-			redirectURL = config.Loaded.OAuth.FrontendURL + redirect
-			q := "?token=" + jwtToken
-			if setupRequired {
-				q += "&setup_required=1"
-			}
-			redirectURL += q
+	if strings.TrimSpace(redirect) == "" {
+		if rc, err := r.Cookie("oauth_redirect"); err == nil && rc.Value != "" {
+			redirect = rc.Value
+			// Clear cookie
+			http.SetCookie(w, &http.Cookie{
+				Name:   "oauth_redirect",
+				Value:  "",
+				MaxAge: -1,
+				Path:   "/",
+			})
 		}
-		http.Redirect(w, r, redirectURL, http.StatusFound)
-		return
 	}
 
-	if rc, err := r.Cookie("oauth_redirect"); err == nil && rc.Value != "" {
-		http.SetCookie(w, &http.Cookie{
-			Name:     "oauth_redirect",
-			Value:    "",
-			MaxAge:   -1,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			Secure:   config.Loaded.App.Env == "production",
-		})
-		var redirectURL string
-		if pendingApproval {
-			redirectURL = config.Loaded.OAuth.FrontendURL + "/waiting-approval"
-		} else {
-			redirectURL = config.Loaded.OAuth.FrontendURL + rc.Value
-			q := "?token=" + jwtToken
-			if setupRequired {
-				q += "&setup_required=1"
-			}
-			redirectURL += q
-		}
-		http.Redirect(w, r, redirectURL, http.StatusFound)
-		return
+	if strings.TrimSpace(redirect) == "" {
+		redirect = "/dashboard"
 	}
 
-	if pendingApproval {
-		utils.RespondForbidden(w, "Account pending approval")
-		return
+	// Construct Redirect URL with Token
+	finalURL := config.Loaded.OAuth.FrontendURL + redirect
+	q := "?token=" + jwtToken
+	if setupRequired {
+		q += "&setup_required=1"
 	}
+	// If new_user, the frontend auth check will handle redirection to /register
+	finalURL += q
 
-	utils.RespondSuccess(w, "OAuth login successful", LoginResponse{
-		Token:         jwtToken,
-		User:          toUserResponse(user),
-		Require2FA:    user.Is2FAEnabled,
-		SetupRequired: setupRequired,
-	})
+	http.Redirect(w, r, finalURL, http.StatusFound)
 }
 
 func sendRegisterRedirect(w http.ResponseWriter, r *http.Request, email, name string) {

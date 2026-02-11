@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"dsi_interna_sys/internal/middleware"
 	"dsi_interna_sys/internal/models"
 	"dsi_interna_sys/internal/utils"
 
@@ -401,6 +402,12 @@ func (h *SupervisorHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	// Manual Cascade: Delete assessments (because ON DELETE RESTRICT)
+	if _, err := tx.Exec("DELETE FROM assessments WHERE assessed_by = ?", userID); err != nil {
+		utils.RespondInternalError(w, "Failed to delete supervisor's assessments")
+		return
+	}
+
 	if _, err := tx.Exec("DELETE FROM supervisors WHERE id = ?", id); err != nil {
 		utils.RespondInternalError(w, "Failed to delete supervisor")
 		return
@@ -461,19 +468,18 @@ func (h *SupervisorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var assigned int64
-	_ = h.db.QueryRow("SELECT COUNT(*) FROM interns WHERE supervisor_id = ?", userID).Scan(&assigned)
-	if assigned > 0 {
-		utils.RespondBadRequest(w, "Supervisor still has assigned interns")
-		return
-	}
-
 	tx, err := h.db.Begin()
 	if err != nil {
 		utils.RespondInternalError(w, "Failed to start transaction")
 		return
 	}
 	defer tx.Rollback()
+
+	// Manual Cascade: Delete assessments (because ON DELETE RESTRICT)
+	if _, err := tx.Exec("DELETE FROM assessments WHERE assessed_by = ?", userID); err != nil {
+		utils.RespondInternalError(w, "Failed to delete supervisor's assessments")
+		return
+	}
 
 	if _, err := tx.Exec("DELETE FROM supervisors WHERE id = ?", id); err != nil {
 		utils.RespondInternalError(w, "Failed to delete supervisor")
@@ -490,4 +496,147 @@ func (h *SupervisorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.RespondSuccess(w, "Supervisor deleted", nil)
+}
+
+// Register handles public supervisor self-registration (similar to intern registration)
+func (h *SupervisorHandler) Register(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name            string `json:"name"`
+		Email           string `json:"email"`
+		Password        string `json:"password"`
+		ConfirmPassword string `json:"confirm_password"`
+		NIP             string `json:"nip"`
+		Phone           string `json:"phone"`
+		Institution     string `json:"institution"`
+		Address         string `json:"address"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.RespondBadRequest(w, "Invalid request body")
+		return
+	}
+
+	// Validate required fields
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Email) == "" ||
+		strings.TrimSpace(req.Password) == "" || strings.TrimSpace(req.Institution) == "" {
+		utils.RespondBadRequest(w, "Name, email, password, and institution are required")
+		return
+	}
+
+	// Validate password
+	if len(req.Password) < 6 {
+		utils.RespondBadRequest(w, "Password must be at least 6 characters")
+		return
+	}
+
+	if req.Password != req.ConfirmPassword {
+		utils.RespondBadRequest(w, "Passwords do not match")
+		return
+	}
+
+	// Check if email already exists
+	var exists int
+	_ = h.db.QueryRow("SELECT COUNT(*) FROM users WHERE email = ?", req.Email).Scan(&exists)
+	if exists > 0 {
+		utils.RespondBadRequest(w, "Email already registered")
+		return
+	}
+
+	// Check for existing "new_user" via token
+	var existingUserID int64
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if claims, err := middleware.ParseToken(tokenString); err == nil {
+			if claims.Role == "new_user" {
+				existingUserID = claims.UserID
+			}
+		}
+	}
+
+	// Start transaction
+	tx, err := h.db.Begin()
+	if err != nil {
+		utils.RespondInternalError(w, "Failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	var userID int64
+
+	if existingUserID > 0 {
+		userID = existingUserID
+		// Upgrade
+		updates := []string{"role = 'pembimbing'"}
+		args := []interface{}{}
+
+		if req.Name != "" {
+			updates = append(updates, "name = ?")
+			args = append(args, req.Name)
+		}
+
+		hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			utils.RespondInternalError(w, "Failed to hash password")
+			return
+		}
+		updates = append(updates, "password_hash = ?")
+		args = append(args, string(hashed))
+
+		query := "UPDATE users SET " + strings.Join(updates, ", ") + " WHERE id = ?"
+		args = append(args, userID)
+
+		if _, err := tx.Exec(query, args...); err != nil {
+			utils.RespondInternalError(w, "Failed to upgrade user profile")
+			return
+		}
+	} else {
+		// Hash password
+		hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			utils.RespondInternalError(w, "Failed to hash password")
+			return
+		}
+
+		// Create user with pembimbing role
+		res, err := tx.Exec(
+			"INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
+			req.Name, req.Email, string(hashed), "pembimbing",
+		)
+		if err != nil {
+			utils.RespondInternalError(w, "Failed to create user account")
+			return
+		}
+		userID, _ = res.LastInsertId()
+	}
+
+	// Create supervisor record with pending status
+	_, err = tx.Exec(
+		`INSERT INTO supervisors (user_id, full_name, nip, phone, address, institution, status)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		userID, req.Name, nullIfEmpty(req.NIP), nullIfEmpty(req.Phone),
+		nullIfEmpty(req.Address), req.Institution, "pending",
+	)
+	if err != nil {
+		utils.RespondInternalError(w, "Failed to create supervisor profile")
+		return
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		utils.RespondInternalError(w, "Failed to complete registration")
+		return
+	}
+
+	// Create notification for admins about new supervisor registration
+	_, _ = h.db.Exec(`
+		INSERT INTO notifications (user_id, type, title, message, link, created_at)
+		SELECT u.id, 'info', 'Pendaftaran Pembimbing Baru', ?, '/supervisors', NOW()
+		FROM users u WHERE u.role = 'admin'
+	`, "Pembimbing baru "+req.Name+" telah mendaftar dan menunggu persetujuan.")
+
+	utils.RespondCreated(w, "Registration successful. Your account is pending admin approval.", map[string]interface{}{
+		"user_id": userID,
+		"status":  "pending",
+	})
 }

@@ -57,6 +57,7 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 
 	internFilter := strings.TrimSpace(r.URL.Query().Get("intern_id"))
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
 	where := []string{}
 	args := []interface{}{}
 
@@ -74,6 +75,36 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			where = append(where, "a.intern_id = ?")
 			args = append(args, id)
 		}
+	} else if role == "pembimbing" || role == "supervisor" || role == "admin" {
+		// Strict requirement: Admin and Supervisors see ONLY assessments they created
+		// We check for both UserID (for admins/users) and SupervisorID (if stored that way, but assessed_by is the key)
+		// The `assessed_by` column stores the User ID of the assessor (or Supervisor ID depending on implementation).
+		// Looking at Create handler: `assessed_by` is set to `assessorID`.
+		// And `assessorCandidates` includes `claims.UserID` and `supID`.
+		// Let's filter by `assessed_by` matching the UserID or SupervisorID.
+
+		// For simplicity and strictness based on "own assessments they have made":
+		// We will filter by the UserID of the Creator.
+		// However, if the system stores Supervisor ID in `assessed_by`, we need to handle that.
+		// Let's check `getSupervisorIDForUser`.
+
+		var assessorIDs []int64
+		assessorIDs = append(assessorIDs, claims.UserID)
+		if supID, ok, _ := h.getSupervisorIDForUser(claims.UserID); ok {
+			assessorIDs = append(assessorIDs, supID)
+		}
+
+		placeholders := make([]string, len(assessorIDs))
+		for i := range assessorIDs {
+			placeholders[i] = "?"
+			args = append(args, assessorIDs[i])
+		}
+		where = append(where, "a.assessed_by IN ("+strings.Join(placeholders, ", ")+")")
+	}
+
+	if search != "" {
+		where = append(where, "(iu.name LIKE ? OR t.title LIKE ?)")
+		args = append(args, "%"+search+"%", "%"+search+"%")
 	}
 
 	whereClause := ""
@@ -85,7 +116,9 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		FROM assessments a
 		LEFT JOIN interns i ON a.intern_id = i.id
 		LEFT JOIN users iu ON i.user_id = iu.id
-		LEFT JOIN users au ON a.assessed_by = au.id
+		LEFT JOIN supervisors s ON a.assessed_by = s.id
+		LEFT JOIN users u_sup ON s.user_id = u_sup.id
+		LEFT JOIN users u_direct ON a.assessed_by = u_direct.id
 		LEFT JOIN tasks t ON a.task_id = t.id
 	`
 
@@ -95,11 +128,16 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// We prioritize User from Supervisor relation (u_sup) over Direct User (u_direct)
+	// because standard flow uses Supervisor ID.
 	query := `
 		SELECT a.id, a.intern_id, a.task_id, a.assessed_by, a.score, a.category, a.aspect,
 		       a.quality_score, a.speed_score, a.initiative_score, a.teamwork_score, a.communication_score,
 		       a.strengths, a.improvements, a.comments, a.notes, a.assessment_date, a.created_at, a.updated_at,
-		       iu.name, au.name, t.title
+		       iu.name, 
+			   COALESCE(u_sup.name, u_direct.name), 
+			   COALESCE(u_sup.role, u_direct.role), 
+			   t.title
 	` + baseFrom + " " + whereClause + " ORDER BY a.created_at DESC LIMIT ? OFFSET ?"
 
 	args = append(args, limit, offset)
@@ -114,12 +152,12 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	var assessments []map[string]interface{}
 	for rows.Next() {
 		var a models.Assessment
-		var internName, assessorName, taskTitle sql.NullString
+		var internName, assessorName, assessorRole, taskTitle sql.NullString
 		if err := rows.Scan(
 			&a.ID, &a.InternID, &a.TaskID, &a.AssessedBy, &a.Score, &a.Category, &a.Aspect,
 			&a.QualityScore, &a.SpeedScore, &a.InitiativeScore, &a.TeamworkScore, &a.CommunicationScore,
 			&a.Strengths, &a.Improvements, &a.Comments, &a.Notes, &a.AssessmentDate, &a.CreatedAt, &a.UpdatedAt,
-			&internName, &assessorName, &taskTitle,
+			&internName, &assessorName, &assessorRole, &taskTitle,
 		); err == nil {
 			if internName.Valid {
 				a.InternName = internName.String
@@ -127,10 +165,19 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			if assessorName.Valid {
 				a.AssessorName = assessorName.String
 			}
+			// Temporarily store role in struct if model supports it, or just pass to presentAssessment map
+			// Since models.Assessment might not have AssessorRole, we can handle it here or update model.
+			// Let's assume we pass it to presentAssessment or handle map creation here.
+
 			if taskTitle.Valid {
 				a.TaskTitle = taskTitle.String
 			}
-			assessments = append(assessments, presentAssessment(a))
+
+			assessmentMap := presentAssessment(a)
+			if assessorRole.Valid {
+				assessmentMap["assessor_role"] = assessorRole.String
+			}
+			assessments = append(assessments, assessmentMap)
 		}
 	}
 
@@ -151,22 +198,27 @@ func (h *AssessmentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, a.intern_id, a.task_id, a.assessed_by, a.score, a.category, a.aspect,
 		       a.quality_score, a.speed_score, a.initiative_score, a.teamwork_score, a.communication_score,
 		       a.strengths, a.improvements, a.comments, a.notes, a.assessment_date, a.created_at, a.updated_at,
-		       iu.name, au.name, t.title
+		       iu.name, 
+			   COALESCE(u_sup.name, u_direct.name), 
+			   COALESCE(u_sup.role, u_direct.role), 
+			   t.title
 		FROM assessments a
 		LEFT JOIN interns i ON a.intern_id = i.id
 		LEFT JOIN users iu ON i.user_id = iu.id
-		LEFT JOIN users au ON a.assessed_by = au.id
+		LEFT JOIN supervisors s ON a.assessed_by = s.id
+		LEFT JOIN users u_sup ON s.user_id = u_sup.id
+		LEFT JOIN users u_direct ON a.assessed_by = u_direct.id
 		LEFT JOIN tasks t ON a.task_id = t.id
 		WHERE a.id = ?
 	`
 
 	var a models.Assessment
-	var internName, assessorName, taskTitle sql.NullString
+	var internName, assessorName, assessorRole, taskTitle sql.NullString
 	err := h.db.QueryRow(query, id).Scan(
 		&a.ID, &a.InternID, &a.TaskID, &a.AssessedBy, &a.Score, &a.Category, &a.Aspect,
 		&a.QualityScore, &a.SpeedScore, &a.InitiativeScore, &a.TeamworkScore, &a.CommunicationScore,
 		&a.Strengths, &a.Improvements, &a.Comments, &a.Notes, &a.AssessmentDate, &a.CreatedAt, &a.UpdatedAt,
-		&internName, &assessorName, &taskTitle,
+		&internName, &assessorName, &assessorRole, &taskTitle,
 	)
 	if err == sql.ErrNoRows {
 		utils.RespondNotFound(w, "Assessment not found")
@@ -195,7 +247,11 @@ func (h *AssessmentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		a.TaskTitle = taskTitle.String
 	}
 
-	utils.RespondSuccess(w, "Assessment retrieved", presentAssessment(a))
+	resp := presentAssessment(a)
+	if assessorRole.Valid {
+		resp["assessor_role"] = assessorRole.String
+	}
+	utils.RespondSuccess(w, "Assessment retrieved", resp)
 }
 
 func (h *AssessmentHandler) GetByInternID(w http.ResponseWriter, r *http.Request) {
@@ -239,18 +295,33 @@ func (h *AssessmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		utils.RespondInternalError(w, "Failed to validate intern")
 		return
 	}
-	if normalizeRole(claims.Role) == "pembimbing" && supervisorID.Valid && supervisorID.Int64 != claims.UserID {
-		utils.RespondForbidden(w, "You cannot assess an intern outside your supervision")
-		return
+	if normalizeRole(claims.Role) == "pembimbing" && normalizeRole(claims.Role) != "admin" {
+		if supervisorID.Valid && supervisorID.Int64 != claims.UserID {
+			// Double check if the user is the supervisor (users.id vs supervisors.user_id mismatch handling in getSupervisorIDForUser logic might be needed if they are distinct,
+			// but here we compare supervisor_id from interns table which likely references users.id or supervisors.id.
+			// Based on schema, interns.supervisor_id references users(id).
+			// So claims.UserID comparison is correct if supervisor_id is user_id.
+			// Let's verify schema again: FOREIGN KEY (supervisor_id) REFERENCES users(id). Yes.
+
+			utils.RespondForbidden(w, "You cannot assess an intern outside your supervision")
+			return
+		}
 	}
 
-	// Resolve assessor ID to satisfy potential FK to supervisors table
+	// Resolve assessor ID to satisfy potential FK to supervisors table (if schema not updated) or users table (if updated)
 	assessorCandidates := []int64{claims.UserID}
-	if supID, ok, err := h.getSupervisorIDForUser(claims.UserID); err == nil && ok {
-		assessorCandidates = append([]int64{supID}, assessorCandidates...)
-	} else if err != nil {
-		utils.RespondInternalError(w, "Failed to validate assessor")
-		return
+
+	// If user is admin, they can assess anyone, so just use their UserID (which now is valid in assessments table)
+	if normalizeRole(claims.Role) == "admin" {
+		// Admin is good to go with just UserID
+	} else {
+		// For pembimbing, try to get supervisor ID as well, in case legacy FK still exists or for data consistency
+		if supID, ok, err := h.getSupervisorIDForUser(claims.UserID); err == nil && ok {
+			assessorCandidates = append([]int64{supID}, assessorCandidates...)
+		} else if err != nil {
+			utils.RespondInternalError(w, "Failed to validate assessor")
+			return
+		}
 	}
 	// Basic score validation to avoid DB constraint errors
 	scores := []struct {
@@ -305,8 +376,8 @@ func (h *AssessmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var lastErr error
-	for idx, assessorID := range assessorCandidates {
-		_, err := h.db.Exec(
+	for _, assessorID := range assessorCandidates {
+		res, err := h.db.Exec(
 			`INSERT INTO assessments (intern_id, task_id, assessed_by, score, aspect, quality_score, speed_score, initiative_score,
 			                          teamwork_score, communication_score, strengths, improvements, comments, notes, assessment_date)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -315,15 +386,18 @@ func (h *AssessmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			nullIfEmpty(req.Strengths), nullIfEmpty(req.Improvements), nullIfEmpty(req.Comments), nullIfEmpty(req.Notes), assessmentDate,
 		)
 		if err == nil {
+			id, _ := res.LastInsertId()
+			// Notify Intern
+			var internUserID int64
+			_ = h.db.QueryRow("SELECT user_id FROM interns WHERE id = ?", req.InternID).Scan(&internUserID)
+			_ = createNotification(h.db, internUserID, models.NotificationAssessmentCreated, "Penilaian Baru",
+				"Anda telah menerima penilaian baru.", "/assessments/"+strconv.FormatInt(id, 10), map[string]interface{}{"assessment_id": id})
+
 			utils.RespondCreated(w, "Assessment created", nil)
 			return
 		}
 		lastErr = err
 		// If FK fails, try next candidate
-		if mysqlErr, ok := err.(*mysql.MySQLError); ok && mysqlErr.Number == 1452 && idx < len(assessorCandidates)-1 {
-			continue
-		}
-		break
 	}
 
 	log.Printf("create assessment failed: %v", lastErr)

@@ -352,15 +352,31 @@ func (h *DashboardHandler) GetAdminDashboard(w http.ResponseWriter, r *http.Requ
 		log.Printf("admin dashboard total tasks query failed: %v", err)
 	}
 
+	// 2.1 Pending Registrations (Interns)
+	var pendingRegistrations int
+	pendingIntQuery := "SELECT COUNT(*) FROM interns i WHERE i.status = 'pending'"
+	pendingIntArgs := []interface{}{}
+	if role == "pembimbing" {
+		pendingIntQuery += " AND i.supervisor_id = ?"
+		pendingIntArgs = append(pendingIntArgs, claims.UserID)
+	}
+	h.db.QueryRow(pendingIntQuery, pendingIntArgs...).Scan(&pendingRegistrations)
+
+	// 2.2 Pending Supervisors (Admin only)
+	var pendingSupervisors int
+	if role == "admin" {
+		h.db.QueryRow("SELECT COUNT(*) FROM supervisors WHERE status = 'pending'").Scan(&pendingSupervisors)
+	}
+
 	// 3. Task Completion Stats (include overdue & in-progress for dashboard pie chart)
 	var completedOnTime, completedLate, pendingTasks, overdueTasks, inProgressTasks int
 	taskStatsQuery := `
 		SELECT 
-			SUM(CASE WHEN t.status = 'completed' AND t.is_late = 0 THEN 1 ELSE 0 END) as on_time,
-			SUM(CASE WHEN t.status = 'completed' AND t.is_late = 1 THEN 1 ELSE 0 END) as late,
-			SUM(CASE WHEN t.status IN ('pending', 'in_progress', 'submitted', 'revision') THEN 1 ELSE 0 END) as pending,
-			SUM(CASE WHEN t.status != 'completed' AND t.is_late = 1 THEN 1 ELSE 0 END) as overdue,
-			SUM(CASE WHEN t.status != 'completed' AND t.is_late = 0 THEN 1 ELSE 0 END) as in_progress
+			COALESCE(SUM(CASE WHEN t.status = 'completed' AND t.is_late = 0 THEN 1 ELSE 0 END), 0) as on_time,
+			COALESCE(SUM(CASE WHEN t.status = 'completed' AND t.is_late = 1 THEN 1 ELSE 0 END), 0) as late,
+			COALESCE(SUM(CASE WHEN t.status IN ('pending', 'in_progress', 'submitted', 'revision') THEN 1 ELSE 0 END), 0) as pending,
+			COALESCE(SUM(CASE WHEN t.status != 'completed' AND t.is_late = 1 THEN 1 ELSE 0 END), 0) as overdue,
+			COALESCE(SUM(CASE WHEN t.status != 'completed' AND t.is_late = 0 THEN 1 ELSE 0 END), 0) as in_progress
 		FROM tasks t
 		LEFT JOIN interns i ON t.intern_id = i.id
 	`
@@ -403,7 +419,7 @@ func (h *DashboardHandler) GetAdminDashboard(w http.ResponseWriter, r *http.Requ
 		tasksQuery += " WHERE i.supervisor_id = ?"
 		taskArgs = append(taskArgs, claims.UserID)
 	}
-	tasksQuery += " ORDER BY t.created_at DESC LIMIT 5"
+	tasksQuery += " ORDER BY t.created_at DESC LIMIT 15"
 
 	tasksRows, err := h.db.Query(tasksQuery, taskArgs...)
 	if err != nil {
@@ -508,15 +524,17 @@ func (h *DashboardHandler) GetAdminDashboard(w http.ResponseWriter, r *http.Requ
 
 	utils.RespondSuccess(w, "Admin dashboard data retrieved", map[string]interface{}{
 		"stats": map[string]interface{}{
-			"total_interns":     totalInterns,
-			"total_tasks":       totalTasks,
-			"completed_on_time": completedOnTime,
-			"completed_late":    completedLate,
-			"pending_tasks":     pendingTasks,
-			"overdue_tasks":     overdueTasks,
-			"in_progress_tasks": inProgressTasks,
-			"present_today":     presentToday,
-			"total_today":       totalToday,
+			"total_interns":         totalInterns,
+			"total_tasks":           totalTasks,
+			"completed_on_time":     completedOnTime,
+			"completed_late":        completedLate,
+			"pending_tasks":         pendingTasks,
+			"overdue_tasks":         overdueTasks,
+			"in_progress_tasks":     inProgressTasks,
+			"present_today":         presentToday,
+			"total_today":           totalToday,
+			"pending_registrations": pendingRegistrations,
+			"pending_supervisors":   pendingSupervisors,
 		},
 		"recent_tasks":     recentTasks,
 		"today_attendance": todayAttendance,

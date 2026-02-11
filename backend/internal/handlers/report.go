@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +34,7 @@ type createReportRequest struct {
 	Type        string `json:"type"` // weekly, monthly, final
 	PeriodStart string `json:"period_start"`
 	PeriodEnd   string `json:"period_end"`
+	Status      string `json:"status"` // submitted, draft
 }
 
 type updateReportRequest struct {
@@ -64,6 +67,7 @@ func (h *ReportHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	filterType := strings.TrimSpace(r.URL.Query().Get("type"))
 	filterStatus := strings.TrimSpace(r.URL.Query().Get("status"))
 	filterIntern := strings.TrimSpace(r.URL.Query().Get("intern_id"))
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
 
 	where := []string{}
 	args := []interface{}{}
@@ -82,6 +86,16 @@ func (h *ReportHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			where = append(where, "r.intern_id = ?")
 			args = append(args, id)
 		}
+	}
+
+	if search != "" {
+		where = append(where, "(r.title LIKE ? OR iu.name LIKE ?)")
+		args = append(args, "%"+search+"%", "%"+search+"%")
+	}
+
+	// Filter out drafts for Admin and Supervisor
+	if role == "admin" || role == "supervisor" || role == "pembimbing" {
+		where = append(where, "r.status != 'draft'")
 	}
 
 	if filterType != "" {
@@ -216,14 +230,26 @@ func (h *ReportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		utils.RespondUnauthorized(w, "Unauthorized")
 		return
 	}
-	if normalizeRole(claims.Role) == "intern" {
-		utils.RespondForbidden(w, "Only admin or pembimbing can create reports")
-		return
-	}
 
 	var req createReportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		utils.RespondBadRequest(w, "Invalid request body")
+		return
+	}
+
+	// Permission check & ID assignment
+	role := normalizeRole(claims.Role)
+	if role == "intern" {
+		// Interns can only create for themselves
+		var internID int64
+		if err := h.db.QueryRow("SELECT id FROM interns WHERE user_id = ?", claims.UserID).Scan(&internID); err != nil {
+			utils.RespondInternalError(w, "Failed to retrieve intern profile")
+			return
+		}
+		req.InternID = internID
+	} else if role != "admin" && role != "pembimbing" {
+		// Only admin, supervisor, and intern can create reports
+		utils.RespondForbidden(w, "Unauthorized to create reports")
 		return
 	}
 
@@ -247,14 +273,41 @@ func (h *ReportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.db.Exec(
+	status := req.Status
+	if status == "" {
+		status = "submitted"
+	}
+
+	// Use 'res' from Exec
+	res, err := h.db.Exec(
 		`INSERT INTO reports (intern_id, created_by, title, content, type, period_start, period_end, status)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 'submitted')`,
-		req.InternID, claims.UserID, req.Title, req.Content, req.Type, start, end,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.InternID, claims.UserID, req.Title, req.Content, req.Type, start, end, status,
 	)
 	if err != nil {
 		utils.RespondInternalError(w, "Failed to create report")
 		return
+	}
+
+	reportID, _ := res.LastInsertId()
+
+	// Notify Supervisor (Pembimbing)
+	var supervisorID sql.NullInt64
+	// Get supervisor of the intern
+	err = h.db.QueryRow("SELECT supervisor_id FROM interns WHERE id = ?", req.InternID).Scan(&supervisorID)
+	if err != nil {
+		log.Printf("[NOTIF_DEBUG] Failed to find supervisor for intern_id %d: %v", req.InternID, err)
+	} else if supervisorID.Valid {
+		log.Printf("[NOTIF_DEBUG] Found supervisor user_id %d for intern_id %d. Creating notification...", supervisorID.Int64, req.InternID)
+		notifErr := createNotification(h.db, supervisorID.Int64, "info", "Laporan Baru",
+			"Seorang intern telah membuat laporan "+req.Type+".", "/reports/"+strconv.FormatInt(reportID, 10), nil)
+		if notifErr != nil {
+			log.Printf("[NOTIF_DEBUG] Failed to create notification for user_id %d: %v", supervisorID.Int64, notifErr)
+		} else {
+			log.Printf("[NOTIF_DEBUG] Successfully created notification for analyst user_id %d", supervisorID.Int64)
+		}
+	} else {
+		log.Printf("[NOTIF_DEBUG] Intern %d has no supervisor assigned (supervisor_id is NULL)", req.InternID)
 	}
 
 	utils.RespondCreated(w, "Report created", nil)
@@ -266,13 +319,32 @@ func (h *ReportHandler) Update(w http.ResponseWriter, r *http.Request) {
 		utils.RespondUnauthorized(w, "Unauthorized")
 		return
 	}
-	if normalizeRole(claims.Role) == "intern" {
-		utils.RespondForbidden(w, "Only admin or pembimbing can update reports")
-		return
-	}
-
 	vars := mux.Vars(r)
 	id, _ := strconv.ParseInt(vars["id"], 10, 64)
+
+	// Check permissions
+	if normalizeRole(claims.Role) == "intern" {
+		// Verify ownership
+		var reportInternID int64
+		err := h.db.QueryRow("SELECT intern_id FROM reports WHERE id = ?", id).Scan(&reportInternID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondNotFound(w, "Report not found")
+				return
+			}
+			utils.RespondInternalError(w, "Database error")
+			return
+		}
+
+		var myInternID int64
+		if err := h.db.QueryRow("SELECT id FROM interns WHERE user_id = ?", claims.UserID).Scan(&myInternID); err != nil || myInternID != reportInternID {
+			utils.RespondForbidden(w, "You can only update your own reports")
+			return
+		}
+	} else if normalizeRole(claims.Role) != "admin" && normalizeRole(claims.Role) != "pembimbing" {
+		utils.RespondForbidden(w, "Unauthorized to update reports")
+		return
+	}
 
 	var req updateReportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -336,13 +408,32 @@ func (h *ReportHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		utils.RespondUnauthorized(w, "Unauthorized")
 		return
 	}
-	if normalizeRole(claims.Role) == "intern" {
-		utils.RespondForbidden(w, "Only admin or pembimbing can delete reports")
-		return
-	}
-
 	vars := mux.Vars(r)
 	id, _ := strconv.ParseInt(vars["id"], 10, 64)
+
+	// Check permissions
+	if normalizeRole(claims.Role) == "intern" {
+		// Verify ownership
+		var reportInternID int64
+		err := h.db.QueryRow("SELECT intern_id FROM reports WHERE id = ?", id).Scan(&reportInternID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondNotFound(w, "Report not found")
+				return
+			}
+			utils.RespondInternalError(w, "Database error")
+			return
+		}
+
+		var myInternID int64
+		if err := h.db.QueryRow("SELECT id FROM interns WHERE user_id = ?", claims.UserID).Scan(&myInternID); err != nil || myInternID != reportInternID {
+			utils.RespondForbidden(w, "You can only delete your own reports")
+			return
+		}
+	} else if normalizeRole(claims.Role) != "admin" && normalizeRole(claims.Role) != "pembimbing" {
+		utils.RespondForbidden(w, "Unauthorized to delete reports")
+		return
+	}
 
 	if _, err := h.db.Exec("DELETE FROM reports WHERE id = ?", id); err != nil {
 		utils.RespondInternalError(w, "Failed to delete report")
@@ -353,15 +444,15 @@ func (h *ReportHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ReportHandler) AddFeedback(w http.ResponseWriter, r *http.Request) {
-	claims, ok := middleware.GetUserFromContext(r.Context())
-	if !ok {
-		utils.RespondUnauthorized(w, "Unauthorized")
-		return
-	}
-	if normalizeRole(claims.Role) == "intern" {
-		utils.RespondForbidden(w, "Only admin or pembimbing can add feedback")
-		return
-	}
+	// claims, ok := middleware.GetUserFromContext(r.Context())
+	// if !ok {
+	// 	utils.RespondUnauthorized(w, "Unauthorized")
+	// 	return
+	// }
+	// if normalizeRole(claims.Role) == "intern" {
+	// 	utils.RespondForbidden(w, "Only admin or pembimbing can add feedback")
+	// 	return
+	// }
 
 	vars := mux.Vars(r)
 	id, _ := strconv.ParseInt(vars["id"], 10, 64)
@@ -381,6 +472,18 @@ func (h *ReportHandler) AddFeedback(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.db.Exec("UPDATE reports SET feedback = ?, status = 'reviewed' WHERE id = ?", payload.Feedback, id); err != nil {
 		utils.RespondInternalError(w, "Failed to add feedback")
 		return
+	}
+
+	// Notify Intern
+	var internUserID int64
+	err := h.db.QueryRow(
+		`SELECT i.user_id FROM reports r
+		 JOIN interns i ON r.intern_id = i.id
+		 WHERE r.id = ?`, id,
+	).Scan(&internUserID)
+	if err == nil {
+		_ = createNotification(h.db, internUserID, "info", "Feedback Laporan",
+			"Pembimbing telah memberikan feedback pada laporan Anda.", "/reports/"+strconv.FormatInt(id, 10), nil)
 	}
 
 	utils.RespondSuccess(w, "Feedback added", nil)
@@ -680,6 +783,7 @@ func (h *ReportHandler) DownloadInternReport(w http.ResponseWriter, r *http.Requ
 
 	vars := mux.Vars(r)
 	internID, _ := strconv.ParseInt(vars["id"], 10, 64)
+	log.Printf(">>> GENERATING INTERN REPORT FOR ID: %d", internID)
 
 	if normalizeRole(claims.Role) == "intern" {
 		var myID int64
@@ -691,19 +795,73 @@ func (h *ReportHandler) DownloadInternReport(w http.ResponseWriter, r *http.Requ
 
 	// Intern info
 	var intern struct {
-		ID        int64
-		FullName  string
-		Email     string
-		StartDate time.Time
-		EndDate   time.Time
+		ID             int64
+		FullName       string
+		Email          string
+		NIS            string
+		School         string
+		Department     string
+		SupervisorName string
+		StartDate      time.Time
+		EndDate        time.Time
+		Avatar         sql.NullString
 	}
-	if err := h.db.QueryRow(
-		`SELECT i.id, i.full_name, u.email, i.start_date, i.end_date
-		 FROM interns i JOIN users u ON i.user_id = u.id
+	err := h.db.QueryRow(
+		`SELECT i.id, i.full_name, u.email, i.nis, i.school, i.department, su.name as supervisor_name, i.start_date, i.end_date, u.avatar
+		 FROM interns i 
+         JOIN users u ON i.user_id = u.id
+         LEFT JOIN users su ON i.supervisor_id = su.id
 		 WHERE i.id = ?`, internID,
-	).Scan(&intern.ID, &intern.FullName, &intern.Email, &intern.StartDate, &intern.EndDate); err != nil {
+	).Scan(&intern.ID, &intern.FullName, &intern.Email, &intern.NIS, &intern.School, &intern.Department, &intern.SupervisorName, &intern.StartDate, &intern.EndDate, &intern.Avatar)
+	if err != nil {
 		utils.RespondNotFound(w, "Intern not found")
 		return
+	}
+
+	// Recent Tasks
+	type taskItem struct {
+		Title    string
+		Status   string
+		Score    sql.NullFloat64
+		Deadline sql.NullTime
+		IsLate   bool
+	}
+	var recentTasks []taskItem
+	tRows, err := h.db.Query(`
+		SELECT title, status, score, deadline, is_late 
+		FROM tasks 
+		WHERE intern_id = ? 
+		ORDER BY created_at DESC LIMIT 10`, internID)
+	if err == nil {
+		defer tRows.Close()
+		for tRows.Next() {
+			var t taskItem
+			tRows.Scan(&t.Title, &t.Status, &t.Score, &t.Deadline, &t.IsLate)
+			recentTasks = append(recentTasks, t)
+		}
+	}
+
+	// Full Attendance History
+	type attItem struct {
+		Date     time.Time
+		Status   string
+		CheckIn  sql.NullTime
+		CheckOut sql.NullTime
+		Notes    sql.NullString
+	}
+	var recentAtts []attItem
+	aRows, err := h.db.Query(`
+		SELECT date, status, check_in_time, check_out_time, notes 
+		FROM attendances 
+		WHERE intern_id = ? 
+		ORDER BY date DESC`, internID)
+	if err == nil {
+		defer aRows.Close()
+		for aRows.Next() {
+			var a attItem
+			aRows.Scan(&a.Date, &a.Status, &a.CheckIn, &a.CheckOut, &a.Notes)
+			recentAtts = append(recentAtts, a)
+		}
 	}
 
 	// Task stats
@@ -788,53 +946,427 @@ func (h *ReportHandler) DownloadInternReport(w http.ResponseWriter, r *http.Requ
 	}
 
 	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetMargins(15, 15, 15)
 	pdf.AddPage()
-	pdf.SetFont("Helvetica", "B", 16)
-	pdf.Cell(0, 10, "Laporan Intern")
+
+	// --- Colors (Vibrant Indigo/Purple) ---
+	primaryIndigo := []int{79, 70, 229} // Indigo-600
+	accentPurple := []int{139, 92, 246} // Violet-500
+	textDark := []int{31, 41, 55}       // Gray-800
+	textMuted := []int{107, 114, 128}   // Gray-500
+	lightGray := []int{209, 213, 219}   // Gray-300
+	bgLighter := []int{249, 250, 251}   // Gray-50
+	borderGray := []int{229, 231, 235}  // Gray-200
+
+	// Status Colors
+	successGreen := []int{34, 197, 94}
+	warningAmber := []int{245, 158, 11}
+	errorRed := []int{239, 68, 68}
+	infoBlue := []int{14, 165, 233}
+
+	// --- Header (Branded) ---
+	pdf.SetXY(15, 15)
+	pdf.SetTextColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+	pdf.SetFont("Helvetica", "B", 18)
+	pdf.Cell(0, 10, "Sistem Manajemen Magang V2")
 	pdf.Ln(8)
 
-	pdf.SetFont("Helvetica", "", 11)
-	pdf.Cell(0, 6, fmt.Sprintf("Nama: %s", intern.FullName))
-	pdf.Ln(5)
-	pdf.Cell(0, 6, fmt.Sprintf("Email: %s", intern.Email))
-	pdf.Ln(5)
-	pdf.Cell(0, 6, fmt.Sprintf("Periode: %s - %s", intern.StartDate.Format("02/01/2006"), intern.EndDate.Format("02/01/2006")))
+	pdf.SetX(15)
+	pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+	pdf.SetFont("Helvetica", "", 12)
+	pdf.Cell(0, 8, "Laporan Kinerja Peserta Magang")
 	pdf.Ln(6)
 
-	pdf.SetFont("Helvetica", "B", 12)
-	pdf.Cell(0, 7, "Ringkasan Tugas")
+	pdf.SetX(15)
+	pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+	pdf.SetFont("Helvetica", "", 8)
+	pdf.Cell(0, 5, fmt.Sprintf("Dibuat pada: %s", time.Now().Format("02 January 2006 15:04")))
+
+	// Line separator
+	pdf.SetDrawColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+	pdf.SetLineWidth(0.8)
+	pdf.Line(15, 38, 195, 38)
+	pdf.SetLineWidth(0.2)
+
+	// --- Profile Section ---
+	pdf.SetY(50)
+	pdf.SetDrawColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+	pdf.Circle(35, 65, 20, "D")
+
+	hasAvatar := false
+	if intern.Avatar.Valid && intern.Avatar.String != "" {
+		avatarPath := strings.TrimPrefix(intern.Avatar.String, "/")
+		if _, err := os.Stat(avatarPath); err == nil {
+			pdf.ImageOptions(avatarPath, 15.5, 45.5, 39, 39, false, gofpdf.ImageOptions{ImageType: "", ReadDpi: true}, 0, "")
+			hasAvatar = true
+		}
+	}
+
+	if !hasAvatar {
+		// Draw Initial if no avatar
+		pdf.SetXY(15, 50)
+		initial := "M"
+		if len(intern.FullName) > 0 {
+			initial = string([]rune(intern.FullName)[0])
+		}
+		pdf.SetFont("Helvetica", "B", 36)
+		pdf.SetTextColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+		pdf.CellFormat(40, 30, initial, "", 0, "C", false, 0, "")
+	}
+
+	// Intern details to the right
+	rightX := 60.0
+	pdf.SetXY(rightX, 52)
+	pdf.SetTextColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+	pdf.SetFont("Helvetica", "B", 18)
+	pdf.Cell(0, 10, intern.FullName)
+	pdf.Ln(10)
+
+	fields := []struct{ k, v string }{
+		{"NIS", intern.NIS},
+		{"Sekolah", intern.School},
+		{"Jurusan", intern.Department},
+		{"Pembimbing", intern.SupervisorName},
+		{"Periode", fmt.Sprintf("%s - %s", intern.StartDate.Format("02 Jan 2006"), intern.EndDate.Format("02 Jan 2006"))},
+	}
+
+	for _, f := range fields {
+		pdf.SetX(rightX)
+		pdf.SetFont("Helvetica", "B", 9)
+		pdf.SetTextColor(accentPurple[0], accentPurple[1], accentPurple[2])
+		pdf.Cell(25, 5, f.k+": ")
+		pdf.SetFont("Helvetica", "", 9)
+		pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+		pdf.Cell(0, 5, f.v)
+		pdf.Ln(5)
+	}
+
+	// Status Badge
+	pdf.SetXY(rightX, pdf.GetY()+2)
+	pdf.SetFillColor(accentPurple[0], accentPurple[1], accentPurple[2])
+	pdf.Rect(pdf.GetX(), pdf.GetY(), 25, 6, "F")
+	pdf.SetTextColor(255, 255, 255)
+	pdf.SetFont("Helvetica", "B", 8)
+	pdf.CellFormat(25, 6, "AKTIF", "", 0, "C", false, 0, "")
+	pdf.Ln(10)
+
+	// --- Progress Bar ---
+	pdf.SetY(105)
+	pdf.SetFont("Helvetica", "", 8)
+	pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+	pdf.Cell(0, 5, fmt.Sprintf("Progress Magang: %.1f%% (%d dari %d hari)", progress, daysCompleted, durationDays))
 	pdf.Ln(6)
-	pdf.SetFont("Helvetica", "", 10)
-	pdf.Cell(0, 5, fmt.Sprintf("Total: %d | Selesai: %d | Dalam Proses: %d | Pending: %d | Revisi: %d", taskStats.Total, taskStats.Completed, taskStats.InProgress, taskStats.Pending, taskStats.Revision))
-	pdf.Ln(5)
-	pdf.Cell(0, 5, fmt.Sprintf("Tepat Waktu: %d | Terlambat: %d | Rata-rata Nilai: %.1f", taskStats.CompletedOnTime, taskStats.CompletedLate, taskStats.AverageScore))
+	pdf.SetFillColor(borderGray[0], borderGray[1], borderGray[2])
+	pdf.Rect(15, pdf.GetY(), 180, 2, "F")
+	pdf.SetFillColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+	pdf.Rect(15, pdf.GetY(), 180*(progress/100.0), 2, "F")
+	pdf.Ln(10)
+
+	// --- Ringkasan Kinerja ---
+	pdf.SetFont("Helvetica", "B", 10)
+	pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+	pdf.Cell(0, 8, " Ringkasan Kinerja")
+	pdf.Ln(8)
+
+	boxW := 43.5
+	boxH := 18.0
+
+	pStats := []struct {
+		val   string
+		label string
+	}{
+		{fmt.Sprintf("%d/%d", taskStats.Completed, taskStats.Total), "TUGAS SELESAI"},
+		{fmt.Sprintf("%.1f%%", attendanceStats.Percentage), "KEHADIRAN"},
+		{fmt.Sprintf("%.1f", taskStats.AverageScore), "RATA-RATA NILAI"},
+		{fmt.Sprintf("%.1f", assessmentStats.Overall), "SKOR PENILAIAN"},
+	}
+
+	for i, s := range pStats {
+		xP := 15 + float64(i)*(boxW+2)
+		pdf.SetFillColor(bgLighter[0], bgLighter[1], bgLighter[2])
+		pdf.Rect(xP, pdf.GetY(), boxW, boxH, "F")
+
+		// Colored side border
+		pdf.SetFillColor(accentPurple[0], accentPurple[1], accentPurple[2])
+		pdf.Rect(xP, pdf.GetY(), 1.5, boxH, "F")
+
+		pdf.SetXY(xP, pdf.GetY()+2)
+		pdf.SetFont("Helvetica", "B", 16)
+		pdf.SetTextColor(0, 0, 0)
+		pdf.CellFormat(boxW, 10, s.val, "", 0, "C", false, 0, "")
+
+		pdf.SetXY(xP, pdf.GetY()+8)
+		pdf.SetFont("Helvetica", "B", 6)
+		pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+		pdf.CellFormat(boxW, 4, s.label, "", 0, "C", false, 0, "")
+	}
+	pdf.Ln(boxH + 10)
+
+	// --- 2 Column Stats Detail ---
+	startY := pdf.GetY()
+
+	// Column 1: Statistik Tugas
+	pdf.SetFont("Helvetica", "B", 10)
+	pdf.SetTextColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+	pdf.Cell(88, 8, "STATISTIK TUGAS")
+
+	// Column 2: Statistik Kehadiran
+	pdf.SetX(110)
+	pdf.Cell(0, 8, "STATISTIK KEHADIRAN")
+	pdf.Ln(8)
+
+	// Task Detail Boxes
+	subBoxW := 27.5
+	subBoxH := 11.0
+
+	taskD := []struct {
+		val   int64
+		label string
+	}{
+		{taskStats.Total, "TOTAL"},
+		{taskStats.CompletedOnTime, "TEPAT WAKTU"},
+		{taskStats.CompletedLate, "TERLAMBAT"},
+	}
+
+	for i, d := range taskD {
+		xP := 15 + float64(i)*(subBoxW+2)
+		pdf.SetFillColor(bgLighter[0], bgLighter[1], bgLighter[2])
+		pdf.Rect(xP, pdf.GetY(), subBoxW, subBoxH, "F")
+
+		// Colored side border
+		colors := [][]int{primaryIndigo, successGreen, warningAmber}
+		pdf.SetFillColor(colors[i][0], colors[i][1], colors[i][2])
+		pdf.Rect(xP, pdf.GetY(), 1.2, subBoxH, "F")
+
+		pdf.SetXY(xP, pdf.GetY()+1.5)
+		pdf.SetFont("Helvetica", "B", 9)
+		pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+		pdf.CellFormat(subBoxW, 5, fmt.Sprintf("%d", d.val), "", 0, "C", false, 0, "")
+
+		pdf.SetXY(xP, pdf.GetY()+4.5)
+		pdf.SetFont("Helvetica", "B", 5)
+		pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+		pdf.CellFormat(subBoxW, 4, d.label, "", 0, "C", false, 0, "")
+	}
+
+	// Attendance Detail Grid
+	pdf.SetXY(110, startY+8)
+	attW := 16.5
+	attL := []string{"HADIR", "TELAT", "ABSEN", "SAKIT", "IZIN"}
+	attV := []int64{attendanceStats.Present, attendanceStats.Late, attendanceStats.Absent, attendanceStats.Sick, attendanceStats.Permission}
+
+	for i, v := range attV {
+		xP := 110 + float64(i)*(attW+1.2)
+		pdf.SetFillColor(bgLighter[0], bgLighter[1], bgLighter[2])
+		pdf.Rect(xP, pdf.GetY(), attW, subBoxH, "F")
+
+		pdf.SetXY(xP, pdf.GetY()+1.5)
+		pdf.SetFont("Helvetica", "B", 9)
+		pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+		pdf.CellFormat(attW, 5, fmt.Sprintf("%d", v), "", 0, "C", false, 0, "")
+
+		pdf.SetXY(xP, pdf.GetY()+4.5)
+		pdf.SetFont("Helvetica", "B", 4.5)
+		pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+		pdf.CellFormat(attW, 4, attL[i], "", 0, "C", false, 0, "")
+	}
+	pdf.Ln(subBoxH + 10)
+
+	// --- Assessment Radar Style Grid ---
+	pdf.SetFont("Helvetica", "B", 10)
+	pdf.SetTextColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+	pdf.Cell(0, 8, "PENILAIAN KOMPETENSI")
+	pdf.Ln(8)
+
+	compW := 35.5
+	compL := []string{"Kualitas Kerja", "Kecepatan", "Inisiatif", "Kerjasama", "Komunikasi"}
+	compV := []float64{assessmentStats.Quality, assessmentStats.Speed, assessmentStats.Initiative, assessmentStats.Teamwork, assessmentStats.Communication}
+
+	rowY := pdf.GetY()
+	for i, v := range compV {
+		xP := 15 + float64(i)*(compW+1)
+		pdf.SetFillColor(bgLighter[0], bgLighter[1], bgLighter[2])
+		pdf.Rect(xP, rowY, compW, 12, "F")
+
+		pdf.SetXY(xP, rowY+1.5)
+		pdf.SetFont("Helvetica", "B", 10)
+		pdf.SetTextColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+		pdf.CellFormat(compW, 6, fmt.Sprintf("%.1f", v), "", 0, "C", false, 0, "")
+
+		pdf.SetXY(xP, rowY+6)
+		pdf.SetFont("Helvetica", "B", 5.5)
+		pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+		pdf.CellFormat(compW, 4, strings.ToUpper(compL[i]), "", 0, "C", false, 0, "")
+	}
+	pdf.Ln(18)
+
+	// --- Tables ---
+	if pdf.GetY() > 220 {
+		pdf.AddPage()
+	}
+
+	pdf.SetFont("Helvetica", "B", 10)
+	pdf.SetTextColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+	pdf.Cell(0, 8, "DETAIL AKTIVITAS TUGAS")
 	pdf.Ln(7)
 
-	pdf.SetFont("Helvetica", "B", 12)
-	pdf.Cell(0, 7, "Ringkasan Presensi")
+	pdf.SetFillColor(bgLighter[0], bgLighter[1], bgLighter[2])
+	pdf.SetFont("Helvetica", "B", 7)
+	pdf.CellFormat(90, 6, "JUDUL TUGAS", "1", 0, "L", true, 0, "")
+	pdf.CellFormat(25, 6, "STATUS", "1", 0, "L", true, 0, "")
+	pdf.CellFormat(20, 6, "NILAI", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(25, 6, "DEADLINE", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(20, 6, "WAKTU", "1", 0, "C", true, 0, "")
 	pdf.Ln(6)
-	pdf.SetFont("Helvetica", "", 10)
-	pdf.Cell(0, 5, fmt.Sprintf("Total: %d | Hadir: %d | Terlambat: %d | Tidak Hadir: %d | Sakit: %d | Izin: %d", attendanceStats.Total, attendanceStats.Present, attendanceStats.Late, attendanceStats.Absent, attendanceStats.Sick, attendanceStats.Permission))
-	pdf.Ln(5)
-	pdf.Cell(0, 5, fmt.Sprintf("Kehadiran: %.1f%%", attendanceStats.Percentage))
+
+	pdf.SetFont("Helvetica", "", 7)
+	for _, t := range recentTasks {
+		pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+		pdf.CellFormat(90, 6, t.Title, "B", 0, "L", false, 0, "")
+
+		st := strings.ToUpper(t.Status)
+		if t.Status == "completed" {
+			pdf.SetTextColor(successGreen[0], successGreen[1], successGreen[2])
+		} else {
+			pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+		}
+		pdf.CellFormat(25, 6, st, "B", 0, "L", false, 0, "")
+
+		sc := "-"
+		if t.Score.Valid {
+			sc = fmt.Sprintf("%.0f", t.Score.Float64)
+		}
+		pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+		pdf.CellFormat(20, 6, sc, "B", 0, "C", false, 0, "")
+
+		dl := "-"
+		if t.Deadline.Valid {
+			dl = t.Deadline.Time.Format("02/01/06")
+		}
+		pdf.CellFormat(25, 6, dl, "B", 0, "C", false, 0, "")
+
+		lt := "-"
+		if t.Status == "completed" {
+			if t.IsLate {
+				pdf.SetTextColor(errorRed[0], errorRed[1], errorRed[2])
+				lt = "LATE"
+			} else {
+				pdf.SetTextColor(infoBlue[0], infoBlue[1], infoBlue[2])
+				lt = "ON TIME"
+			}
+		}
+		pdf.CellFormat(20, 6, lt, "B", 0, "C", false, 0, "")
+		pdf.Ln(6)
+	}
+
+	pdf.Ln(10)
+	if pdf.GetY() > 220 {
+		pdf.AddPage()
+	}
+
+	pdf.SetFont("Helvetica", "B", 10)
+	pdf.SetTextColor(primaryIndigo[0], primaryIndigo[1], primaryIndigo[2])
+	pdf.Cell(0, 8, "RIWAYAT KEHADIRAN")
 	pdf.Ln(7)
 
-	pdf.SetFont("Helvetica", "B", 12)
-	pdf.Cell(0, 7, "Ringkasan Penilaian")
+	pdf.SetFillColor(bgLighter[0], bgLighter[1], bgLighter[2])
+	pdf.SetFont("Helvetica", "B", 7)
+	pdf.CellFormat(35, 6, "TANGGAL", "1", 0, "L", true, 0, "")
+	pdf.CellFormat(30, 6, "STATUS", "1", 0, "L", true, 0, "")
+	pdf.CellFormat(30, 6, "MASUK", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(30, 6, "KELUAR", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(55, 6, "CATATAN", "1", 0, "L", true, 0, "")
 	pdf.Ln(6)
-	pdf.SetFont("Helvetica", "", 10)
-	pdf.Cell(0, 5, fmt.Sprintf("Kualitas: %.1f | Kecepatan: %.1f | Inisiatif: %.1f | Kerjasama: %.1f | Komunikasi: %.1f", assessmentStats.Quality, assessmentStats.Speed, assessmentStats.Initiative, assessmentStats.Teamwork, assessmentStats.Communication))
-	pdf.Ln(5)
-	pdf.Cell(0, 5, fmt.Sprintf("Skor Keseluruhan: %.1f", assessmentStats.Overall))
-	pdf.Ln(7)
 
-	pdf.SetFont("Helvetica", "B", 12)
-	pdf.Cell(0, 7, "Progress Magang")
-	pdf.Ln(6)
-	pdf.SetFont("Helvetica", "", 10)
-	pdf.Cell(0, 5, fmt.Sprintf("Durasi: %d hari | Hari berjalan: %d | Progress: %.1f%%", durationDays, daysCompleted, progress))
+	pdf.SetFont("Helvetica", "", 7)
+	for _, a := range recentAtts {
+		pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+		pdf.CellFormat(35, 6, a.Date.Format("02 Jan 2006"), "B", 0, "L", false, 0, "")
 
-	filename := fmt.Sprintf("Laporan_%s_%s.pdf", sanitizeFilename(intern.FullName), time.Now().Format("2006-01-02"))
+		st := strings.ToUpper(a.Status)
+		if a.Status == "present" {
+			pdf.SetTextColor(34, 197, 94) // success green
+		} else if a.Status == "late" {
+			pdf.SetTextColor(245, 158, 11) // warning amber
+		} else {
+			pdf.SetTextColor(239, 68, 68) // error red
+		}
+		pdf.CellFormat(30, 6, st, "B", 0, "L", false, 0, "")
+		pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+
+		in := "-"
+		if a.CheckIn.Valid {
+			in = a.CheckIn.Time.Format("15:04")
+		}
+		pdf.CellFormat(30, 6, in, "B", 0, "C", false, 0, "")
+
+		out := "-"
+		if a.CheckOut.Valid {
+			out = a.CheckOut.Time.Format("15:04")
+		}
+		pdf.CellFormat(30, 6, out, "B", 0, "C", false, 0, "")
+
+		nt := "-"
+		if a.Notes.Valid {
+			nt = a.Notes.String
+			if len(nt) > 40 {
+				nt = nt[:37] + "..."
+			}
+		}
+		pdf.CellFormat(55, 6, nt, "B", 0, "L", false, 0, "")
+		pdf.Ln(6)
+	}
+
+	// Signatures
+	pdf.Ln(25)
+	if pdf.GetY() > 230 {
+		pdf.AddPage()
+	}
+
+	sy := pdf.GetY()
+	pdf.SetDrawColor(lightGray[0], lightGray[1], lightGray[2])
+
+	// Intern
+	pdf.SetXY(15, sy+20)
+	pdf.CellFormat(55, 1, "", "T", 0, "C", false, 0, "")
+	pdf.SetXY(15, sy+21)
+	pdf.SetFont("Helvetica", "B", 8)
+	pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+	pdf.CellFormat(55, 4, strings.ToUpper(intern.FullName), "", 0, "C", false, 0, "")
+	pdf.SetXY(15, sy+25)
+	pdf.SetFont("Helvetica", "", 7)
+	pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+	pdf.CellFormat(55, 4, "PESERTA MAGANG", "", 0, "C", false, 0, "")
+
+	// Supervisor
+	pdf.SetXY(75, sy+20)
+	pdf.CellFormat(55, 1, "", "T", 0, "C", false, 0, "")
+	pdf.SetXY(75, sy+21)
+	pdf.SetFont("Helvetica", "B", 8)
+	pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+	pdf.CellFormat(55, 4, strings.ToUpper(intern.SupervisorName), "", 0, "C", false, 0, "")
+	pdf.SetXY(75, sy+25)
+	pdf.SetFont("Helvetica", "", 7)
+	pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+	pdf.CellFormat(55, 4, "PEMBIMBING LAPANGAN", "", 0, "C", false, 0, "")
+
+	// Dept Head
+	pdf.SetXY(135, sy+20)
+	pdf.CellFormat(55, 1, "", "T", 0, "C", false, 0, "")
+	pdf.SetXY(135, sy+21)
+	pdf.SetFont("Helvetica", "B", 8)
+	pdf.SetTextColor(textDark[0], textDark[1], textDark[2])
+	pdf.CellFormat(55, 4, "____________________", "", 0, "C", false, 0, "")
+	pdf.SetXY(135, sy+25)
+	pdf.SetFont("Helvetica", "", 7)
+	pdf.SetTextColor(textMuted[0], textMuted[1], textMuted[2])
+	pdf.CellFormat(55, 4, "KEPALA DIVISI", "", 0, "C", false, 0, "")
+
+	pdf.SetFont("Helvetica", "I", 6)
+	pdf.SetXY(0, 285)
+	pdf.CellFormat(210, 8, "Laporan Resmi InternaPro - Dicetak Secara Otomatis oleh Sistem", "", 0, "C", false, 0, "")
+
+	filename := fmt.Sprintf("Laporan_%s_%s.pdf", sanitizeFilename(intern.FullName), time.Now().Format("2006-01-02_150405"))
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	if err := pdf.Output(w); err != nil {

@@ -65,6 +65,18 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// ParseToken parses and validates a JWT token string
+func ParseToken(tokenString string) (*Claims, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(config.Loaded.JWT.Secret), nil
+	})
+	if err != nil || !token.Valid {
+		return nil, err
+	}
+	return claims, nil
+}
+
 // GetUserFromContext extracts user claims from context
 func GetUserFromContext(ctx context.Context) (*Claims, bool) {
 	claims, ok := ctx.Value(UserContextKey).(*Claims)
