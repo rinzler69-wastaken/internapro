@@ -113,6 +113,11 @@ func (h *InternHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		args = append(args, like, like, like, like)
 	}
 
+	// RESTRICTION: Only Admin can see pending interns
+	if role != "admin" {
+		where = append(where, "i.status != 'pending'")
+	}
+
 	whereClause := ""
 	if len(where) > 0 {
 		whereClause = "WHERE " + strings.Join(where, " AND ")

@@ -93,10 +93,20 @@ func (h *ReportHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "%"+search+"%", "%"+search+"%")
 	}
 
-	// Filter out drafts for Admin and Supervisor
-	if role == "admin" || role == "supervisor" || role == "pembimbing" {
-		where = append(where, "r.status != 'draft'")
-	}
+	// OLD LOGIC removed:
+	/*
+		if role == "admin" || role == "supervisor" || role == "pembimbing" {
+			where = append(where, "(r.status != 'draft' OR r.created_by = ?)")
+			args = append(args, claims.UserID)
+		}
+	*/
+
+	// NEW STRICT LOGIC:
+	// Everyone (Admin, Supervisor, Intern) can only see:
+	// 1. Reports that are NOT 'draft' (submitted, approved, etc.)
+	// 2. 'draft' reports that THEY created (created_by = me)
+	where = append(where, "(r.status != 'draft' OR r.created_by = ?)")
+	args = append(args, claims.UserID)
 
 	if filterType != "" {
 		where = append(where, "r.type = ?")
@@ -291,23 +301,25 @@ func (h *ReportHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	reportID, _ := res.LastInsertId()
 
-	// Notify Supervisor (Pembimbing)
-	var supervisorID sql.NullInt64
-	// Get supervisor of the intern
-	err = h.db.QueryRow("SELECT supervisor_id FROM interns WHERE id = ?", req.InternID).Scan(&supervisorID)
-	if err != nil {
-		log.Printf("[NOTIF_DEBUG] Failed to find supervisor for intern_id %d: %v", req.InternID, err)
-	} else if supervisorID.Valid {
-		log.Printf("[NOTIF_DEBUG] Found supervisor user_id %d for intern_id %d. Creating notification...", supervisorID.Int64, req.InternID)
-		notifErr := createNotification(h.db, supervisorID.Int64, "info", "Laporan Baru",
-			"Seorang intern telah membuat laporan "+req.Type+".", "/reports/"+strconv.FormatInt(reportID, 10), nil)
-		if notifErr != nil {
-			log.Printf("[NOTIF_DEBUG] Failed to create notification for user_id %d: %v", supervisorID.Int64, notifErr)
+	// Notify Supervisor (Pembimbing) ONLY if status is submitted
+	if status == "submitted" {
+		var supervisorID sql.NullInt64
+		// Get supervisor of the intern
+		err = h.db.QueryRow("SELECT supervisor_id FROM interns WHERE id = ?", req.InternID).Scan(&supervisorID)
+		if err != nil {
+			log.Printf("[NOTIF_DEBUG] Failed to find supervisor for intern_id %d: %v", req.InternID, err)
+		} else if supervisorID.Valid {
+			log.Printf("[NOTIF_DEBUG] Found supervisor user_id %d for intern_id %d. Creating notification...", supervisorID.Int64, req.InternID)
+			notifErr := createNotification(h.db, supervisorID.Int64, "info", "Laporan Baru",
+				"Seorang intern telah membuat laporan "+req.Type+".", "/reports/"+strconv.FormatInt(reportID, 10), nil)
+			if notifErr != nil {
+				log.Printf("[NOTIF_DEBUG] Failed to create notification for user_id %d: %v", supervisorID.Int64, notifErr)
+			} else {
+				log.Printf("[NOTIF_DEBUG] Successfully created notification for analyst user_id %d", supervisorID.Int64)
+			}
 		} else {
-			log.Printf("[NOTIF_DEBUG] Successfully created notification for analyst user_id %d", supervisorID.Int64)
+			log.Printf("[NOTIF_DEBUG] Intern %d has no supervisor assigned (supervisor_id is NULL)", req.InternID)
 		}
-	} else {
-		log.Printf("[NOTIF_DEBUG] Intern %d has no supervisor assigned (supervisor_id is NULL)", req.InternID)
 	}
 
 	utils.RespondCreated(w, "Report created", nil)
@@ -393,10 +405,33 @@ func (h *ReportHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch old status and intern_id for notification logic
+	var oldStatus string
+	var reportInternID int64
+	var reportType string
+	_ = h.db.QueryRow("SELECT status, intern_id, type FROM reports WHERE id = ?", id).Scan(&oldStatus, &reportInternID, &reportType)
+
 	args = append(args, id)
 	if _, err := h.db.Exec("UPDATE reports SET "+strings.Join(updates, ", ")+" WHERE id = ?", args...); err != nil {
 		utils.RespondInternalError(w, "Failed to update report")
 		return
+	}
+
+	// Check if status changed to 'submitted'
+	newStatus := ""
+	if req.Status != nil {
+		newStatus = *req.Status
+	}
+
+	if oldStatus == "draft" && newStatus == "submitted" {
+		// Notify Supervisor
+		var supervisorID sql.NullInt64
+		// Use := for new err variable or reused one if available
+		err := h.db.QueryRow("SELECT supervisor_id FROM interns WHERE id = ?", reportInternID).Scan(&supervisorID)
+		if err == nil && supervisorID.Valid {
+			_ = createNotification(h.db, supervisorID.Int64, "info", "Laporan Baru",
+				"Seorang intern telah mengirim laporan "+reportType+".", "/reports/"+strconv.FormatInt(id, 10), nil)
+		}
 	}
 
 	utils.RespondSuccess(w, "Report updated", nil)

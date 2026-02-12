@@ -74,6 +74,12 @@ func (h *SupervisorHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		args = append(args, like, like, like, like)
 	}
 
+	// RESTRICTION: Only Admin can see pending supervisors
+	claims, ok := middleware.GetUserFromContext(r.Context())
+	if !ok || normalizeRole(claims.Role) != "admin" {
+		where = append(where, "s.status != 'pending'")
+	}
+
 	whereClause := ""
 	if len(where) > 0 {
 		whereClause = "WHERE " + strings.Join(where, " AND ")

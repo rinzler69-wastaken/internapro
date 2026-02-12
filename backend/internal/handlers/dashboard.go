@@ -352,15 +352,13 @@ func (h *DashboardHandler) GetAdminDashboard(w http.ResponseWriter, r *http.Requ
 		log.Printf("admin dashboard total tasks query failed: %v", err)
 	}
 
-	// 2.1 Pending Registrations (Interns)
+	// 2.1 Pending Registrations (Interns) - Admin Only
 	var pendingRegistrations int
-	pendingIntQuery := "SELECT COUNT(*) FROM interns i WHERE i.status = 'pending'"
-	pendingIntArgs := []interface{}{}
-	if role == "pembimbing" {
-		pendingIntQuery += " AND i.supervisor_id = ?"
-		pendingIntArgs = append(pendingIntArgs, claims.UserID)
+	if role == "admin" {
+		pendingIntQuery := "SELECT COUNT(*) FROM interns i WHERE i.status = 'pending'"
+		pendingIntArgs := []interface{}{}
+		h.db.QueryRow(pendingIntQuery, pendingIntArgs...).Scan(&pendingRegistrations)
 	}
-	h.db.QueryRow(pendingIntQuery, pendingIntArgs...).Scan(&pendingRegistrations)
 
 	// 2.2 Pending Supervisors (Admin only)
 	var pendingSupervisors int

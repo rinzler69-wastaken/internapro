@@ -102,8 +102,8 @@ func (h *TaskHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Supervisors/pembimbing only see tasks for their own interns
 		if role == "pembimbing" {
-			where = append(where, "i.supervisor_id = ?")
-			args = append(args, claims.UserID)
+			where = append(where, "(i.supervisor_id = ? OR t.assigned_by = ?)")
+			args = append(args, claims.UserID, claims.UserID)
 		}
 		if internFilter != "" {
 			if id, err := strconv.ParseInt(internFilter, 10, 64); err == nil {
