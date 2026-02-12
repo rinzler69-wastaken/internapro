@@ -115,14 +115,13 @@
   async function fetchNotifications() {
     if (!auth.token || !auth.user) return;
     // Skip fetching for interns without profile to avoid 500s
-    if (
-      auth.user.role === "intern" &&
-      !auth.user.intern_id &&
-      !auth.user.internId
-    )
-      return;
+
     try {
-      const res = await api.getNotifications({ page: 1, limit: 5, is_read: false });
+      const res = await api.getNotifications({
+        page: 1,
+        limit: 5,
+        is_read: false,
+      });
       notifications = res.data || [];
       unreadCount = notifications.filter((n) => !n.is_read).length;
     } catch (err) {
@@ -310,22 +309,35 @@
                   onclick={async () => {
                     const id = notif.id;
                     const isRead = notif.is_read;
-                    
+
                     let link = "/notifications";
                     const snap = $state.snapshot(notif);
                     if (typeof snap.link === "string") link = snap.link;
-                    else if (snap.link && snap.link.Valid) link = snap.link.String;
-                    
-                    console.log("🔔 [Topbar] User clicked notification:", id, "Link:", link);
-                    
+                    else if (snap.link && snap.link.Valid)
+                      link = snap.link.String;
+
+                    console.log(
+                      "🔔 [Topbar] User clicked notification:",
+                      id,
+                      "Link:",
+                      link,
+                    );
+
                     // Close dropdown
                     notifDropdownOpen = false;
-                    
+
                     // ALWAYS remove from local view when clicked
-                    console.log("✨ Removing ID:", id, "Current count:", notifications.length);
-                    notifications = notifications.filter(n => String(n.id) !== String(id));
+                    console.log(
+                      "✨ Removing ID:",
+                      id,
+                      "Current count:",
+                      notifications.length,
+                    );
+                    notifications = notifications.filter(
+                      (n) => String(n.id) !== String(id),
+                    );
                     console.log("✨ New count:", notifications.length);
-                    
+
                     if (!isRead) {
                       unreadCount = Math.max(0, unreadCount - 1);
                       try {
@@ -335,7 +347,7 @@
                         console.error("❌ Failed server mark read:", err);
                       }
                     }
-                    
+
                     goto(link);
                   }}
                 >

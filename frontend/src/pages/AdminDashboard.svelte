@@ -99,7 +99,10 @@
           ? api.getSupervisors({ status: "pending", limit: 5 })
           : Promise.resolve({ data: [], meta: { total: 0 } });
 
-      const submittedTasksReq = api.getTasks({ status: "submitted", limit: 15 });
+      const submittedTasksReq = api.getTasks({
+        status: "submitted",
+        limit: 15,
+      });
       const attendanceReq = api.getAttendance({ page: 1, limit: 500 });
 
       let serverStats = null;
@@ -465,7 +468,7 @@
     </div>
   {:else}
     <!-- Pending Registrations Card -->
-    {#if dashboardData.pendingInternsList.length > 0 || dashboardData.pendingSupervisorsList.length > 0}
+    {#if auth.user?.role === "admin" && (dashboardData.pendingInternsList.length > 0 || dashboardData.pendingSupervisorsList.length > 0)}
       <div class="card approval-card animate-slide-up">
         <div class="approval-decoration"></div>
         <div

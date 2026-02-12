@@ -452,7 +452,9 @@
         <option value="active">Aktif</option>
         <option value="completed">Selesai</option>
         <option value="cancelled">Cancelled</option>
-        <option value="pending">Pending</option>
+        {#if isAdmin}
+          <option value="pending">Pending</option>
+        {/if}
       </select>
     </div>
 

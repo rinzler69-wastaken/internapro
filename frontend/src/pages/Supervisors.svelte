@@ -422,7 +422,9 @@
       >
         <option value="">Semua Status</option>
         <option value="active">Aktif</option>
-        <!-- <option value="pending">Pending</option> -->
+        {#if auth.user?.role === "admin"}
+          <option value="pending">Pending</option>
+        {/if}
       </select>
     </div>
 
