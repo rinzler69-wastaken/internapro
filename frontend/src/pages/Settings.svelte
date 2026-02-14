@@ -5,6 +5,35 @@
   let loading = $state(true);
   let savingAttendance = $state(false);
 
+  // Office Management State
+  let officeList = $state([]);
+  let activeOfficeId = $state(null);
+  let selectedOfficeId = $state("");
+  let loadingOffices = $state(false);
+  let creatingOffice = $state(false);
+  let deletingOffice = $state(false);
+  let settingActive = $state(false);
+  let showAddModal = $state(false);
+
+  // Search State
+  let searchingPlaces = $state(false);
+  let searchResults = $state([]);
+
+  let newOffice = $state({
+    name: "",
+    latitude: "",
+    longitude: "",
+    radius_meters: 100, // Default, though global setting might override
+    address: "",
+  });
+
+  // Derived state for current selected office details
+  let currentOffice = $derived(
+    selectedOfficeId && selectedOfficeId !== "new"
+      ? officeList.find((o) => o.id == selectedOfficeId)
+      : null,
+  );
+
   let attendanceForm = $state({
     attendance_open_time: "07:00",
     check_in_time: "08:00",
@@ -39,10 +68,11 @@
   };
 
   onMount(async () => {
-    await fetchSettings();
+    await Promise.all([fetchSettings(), fetchOffices()]);
     loading = false;
   });
 
+  // ... (time helpers: stripSeconds, addMinutesToTime, parseWorkdays, toggleWorkday, isWorkdaySelected, toggleTodayOff, handleTodayOffChange stay same)
   const stripSeconds = (val) => {
     if (!val) return "";
     const parts = val.split(":");
@@ -106,6 +136,12 @@
         if (item?.key) map[item.key] = item.value;
       });
 
+      // Set active office ID
+      if (map.active_office_id) {
+        activeOfficeId = Number(map.active_office_id);
+        if (!selectedOfficeId) selectedOfficeId = activeOfficeId;
+      }
+
       attendanceForm = {
         attendance_open_time:
           stripSeconds(map.attendance_open_time || map.office_start_time) ||
@@ -122,10 +158,12 @@
         office_name: map.office_name || "Kantor Pusat",
         workdays: parseWorkdays(map.workdays || map.work_days),
         manual_off_date: map.manual_off_date || "",
+        // active_office_id: map.active_office_id, // Removed to fix lint type error
       };
 
-      // derive tolerance from legacy late_tolerance_time if minutes not present
+      // derive tolerance logic... (same as before)
       if (!map.late_tolerance_minutes && map.late_tolerance_time) {
+        // ... (existing logic)
         const start = stripSeconds(
           map.check_in_time || map.office_start_time || "08:00",
         );
@@ -139,53 +177,136 @@
         if (diff && diff > 0) attendanceForm.late_tolerance_minutes = diff;
       }
     } catch (err) {
-      console.warn("Gagal memuat pengaturan, mencoba bootstrap...", err);
-      // Try to bootstrap settings table by posting defaults once
-      try {
-        await api.updateSettings({
-          attendance_open_time: "07:00:00",
-          check_in_time: "08:00:00",
-          check_out_time: "17:00:00",
-          late_tolerance_minutes: "15",
-          office_latitude: "-7.052683",
-          office_longitude: "110.469375",
-          max_checkin_distance: "100",
-          office_start_time: "08:00:00",
-          office_end_time: "17:00:00",
-          office_radius: "100",
-          late_tolerance_time: "08:15:00",
-          workdays: "1,2,3,4,5,6",
-          manual_off_date: "",
-        });
-        // retry fetch once
-        const retry = await api.getSettings();
-        const list = retry?.data || [];
-        const map = {};
-        list.forEach((item) => {
-          if (item?.key) map[item.key] = item.value;
-        });
-        attendanceForm = {
-          attendance_open_time:
-            stripSeconds(map.attendance_open_time || map.office_start_time) ||
-            "07:00",
-          check_in_time:
-            stripSeconds(map.check_in_time || map.office_start_time) || "08:00",
-          late_tolerance_minutes:
-            Number(map.late_tolerance_minutes ?? 15) || 15,
-          check_out_time:
-            stripSeconds(map.check_out_time || map.office_end_time) || "17:00",
-          office_latitude: map.office_latitude || "-7.052683",
-          office_longitude: map.office_longitude || "110.469375",
-          max_checkin_distance:
-            Number(map.max_checkin_distance ?? map.office_radius ?? 100) || 100,
-          office_name: map.office_name || "Kantor Pusat",
-          workdays: parseWorkdays(map.workdays || map.work_days),
-          manual_off_date: map.manual_off_date || "",
-        };
-      } catch (err2) {
-        console.error("Bootstrap settings failed", err2);
-        alert("Gagal memuat pengaturan: " + (err2.message || "unknown error"));
+      console.warn("Gagal memuat pengaturan...", err);
+    }
+  }
+
+  async function fetchOffices() {
+    loadingOffices = true;
+    try {
+      const res = await api.getOffices();
+      if (res.success) {
+        officeList = res.data || [];
+        // If no selected office, select active or first
+        if (!selectedOfficeId && officeList.length > 0) {
+          selectedOfficeId = activeOfficeId || officeList[0].id;
+        }
       }
+    } catch (err) {
+      console.error("Failed to load offices", err);
+    } finally {
+      loadingOffices = false;
+    }
+  }
+
+  function handleLocationChange() {
+    if (selectedOfficeId === "new") {
+      selectedOfficeId = ""; // Reset dropdown
+      showAddModal = true;
+    }
+  }
+
+  function closeAddModal() {
+    showAddModal = false;
+    newOffice = {
+      name: "",
+      latitude: "",
+      longitude: "",
+      radius_meters: 100,
+      address: "",
+    };
+    searchResults = [];
+  }
+
+  async function searchPlaces(query) {
+    if (!query) return;
+    searchingPlaces = true;
+    searchResults = [];
+    try {
+      const res = await api.searchPlaces(query);
+      if (res.success) {
+        searchResults = res.data || [];
+        if (searchResults.length === 0) {
+          alert("Tidak ditemukan lokasi dengan kata kunci tersebut.");
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Gagal mencari lokasi: " + err.message);
+    } finally {
+      searchingPlaces = false;
+    }
+  }
+
+  function selectPlace(place) {
+    newOffice = {
+      ...newOffice,
+      name: place.name,
+      latitude: String(place.latitude),
+      longitude: String(place.longitude),
+      address: place.address,
+    };
+    searchResults = [];
+  }
+
+  async function handleAddOffice() {
+    if (!newOffice.name || !newOffice.latitude || !newOffice.longitude) {
+      alert("Mohon lengkapi nama dan koordinat.");
+      return;
+    }
+    creatingOffice = true;
+    try {
+      const payload = {
+        ...newOffice,
+        latitude: parseFloat(newOffice.latitude),
+        longitude: parseFloat(newOffice.longitude),
+        radius_meters: parseInt(String(newOffice.radius_meters)) || 100,
+      };
+      const res = await api.createOffice(payload);
+      if (res.success) {
+        await fetchOffices();
+        selectedOfficeId = res.data.id; // Select the new office
+        closeAddModal();
+        // If it's the first office, maybe set it active automatically?
+        // Better to let user expicitly set active.
+      }
+    } catch (err) {
+      alert("Gagal menambah lokasi: " + err.message);
+    } finally {
+      creatingOffice = false;
+    }
+  }
+
+  async function handleDeleteOffice() {
+    if (!currentOffice) return;
+    if (!confirm(`Hapus lokasi "${currentOffice.name}"?`)) return;
+
+    deletingOffice = true;
+    try {
+      await api.deleteOffice(currentOffice.id);
+      await fetchOffices();
+      selectedOfficeId = activeOfficeId || officeList[0]?.id || "";
+    } catch (err) {
+      alert("Gagal menghapus lokasi: " + err.message);
+    } finally {
+      deletingOffice = false;
+    }
+  }
+
+  async function handleSetActive() {
+    if (!currentOffice) return;
+    settingActive = true;
+    try {
+      await api.setActiveOffice(currentOffice.id);
+      activeOfficeId = currentOffice.id;
+      // fetchSettings will refresh the legacy fields if needed, but we have activeOfficeId state now.
+      // We might want to reload settings to ensure consistency?
+      await fetchSettings();
+      alert(`Lokasi aktif diubah ke "${currentOffice.name}"`);
+    } catch (err) {
+      alert("Gagal mengatur lokasi aktif: " + err.message);
+    } finally {
+      settingActive = false;
     }
   }
 
@@ -198,16 +319,16 @@
         check_in_time: t(attendanceForm.check_in_time),
         check_out_time: t(attendanceForm.check_out_time),
         late_tolerance_minutes: String(attendanceForm.late_tolerance_minutes),
-        office_latitude: attendanceForm.office_latitude,
-        office_longitude: attendanceForm.office_longitude,
-        max_checkin_distance: String(attendanceForm.max_checkin_distance),
-        office_name: attendanceForm.office_name || "Kantor Pusat",
+        // office_latitude: attendanceForm.office_latitude, // NO LONGER USED from here, comes from office_locations
+        // office_longitude: attendanceForm.office_longitude, // NO LONGER USED from here
+        max_checkin_distance: String(attendanceForm.max_checkin_distance), // This is GLOBAL now
+        // office_name: attendanceForm.office_name, // NO LONGER USED from here
         workdays: (attendanceForm.workdays || []).join(","),
         manual_off_date: attendanceForm.manual_off_date || "",
         // legacy/compat keys
         office_start_time: t(attendanceForm.check_in_time),
         office_end_time: t(attendanceForm.check_out_time),
-        office_radius: String(attendanceForm.max_checkin_distance),
+        // office_radius: String(attendanceForm.max_checkin_distance), // GLOBAL
         late_tolerance_time: t(
           addMinutesToTime(
             attendanceForm.check_in_time,
@@ -223,6 +344,10 @@
       savingAttendance = false;
     }
   }
+
+  function handleKeydown(e) {
+    if (e.key === "Escape" && showAddModal) closeAddModal();
+  }
 </script>
 
 <div class="page-bg">
@@ -233,7 +358,7 @@
       </div>
 
       <button
-        class="btn-primary"
+        class="btn-blue"
         onclick={saveAttendanceSettings}
         disabled={savingAttendance}
       >
@@ -383,49 +508,11 @@
         <div class="content-card animate-slide-up">
           <div class="card-header">
             <h3>Lokasi Absensi</h3>
-            <p>Tentukan koordinat kantor dan radius maksimum.</p>
+            <p>Kelola lokasi kantor yang tersedia dan pilih lokasi aktif.</p>
           </div>
           <div class="card-body space-y-4">
-            <div class="form-grid">
-              <div class="form-group">
-                <label class="label" for="office-name">Nama Kantor</label>
-                <input
-                  id="office-name"
-                  class="input"
-                  type="text"
-                  bind:value={attendanceForm.office_name}
-                  placeholder="Kantor Pusat"
-                />
-                <p class="help-text">
-                  Nama kantor yang akan ditampilkan di dashboard.
-                </p>
-              </div>
-            </div>
-            <div class="form-grid">
-              <div class="form-group">
-                <label class="label" for="office-latitude"
-                  >Latitude (Lintang)</label
-                >
-                <input
-                  id="office-latitude"
-                  class="input"
-                  type="text"
-                  bind:value={attendanceForm.office_latitude}
-                  placeholder="-7.052xxx"
-                />
-              </div>
-              <div class="form-group">
-                <label class="label" for="office-longitude"
-                  >Longitude (Bujur)</label
-                >
-                <input
-                  id="office-longitude"
-                  class="input"
-                  type="text"
-                  bind:value={attendanceForm.office_longitude}
-                  placeholder="110.469xxx"
-                />
-              </div>
+            <!-- Global Radius Setting -->
+            <div class="form-grid mb-4 border-b border-slate-100 pb-4">
               <div class="form-group">
                 <label class="label" for="max-checkin-distance"
                   >Radius Maksimal (meter)</label
@@ -438,20 +525,149 @@
                   bind:value={attendanceForm.max_checkin_distance}
                 />
                 <p class="help-text">
-                  Jarak maksimal dari titik kantor untuk bisa absen.
+                  Jarak maksimal dari titik kantor untuk bisa absen (Global).
                 </p>
               </div>
             </div>
 
-            <div class="info-box">
+            <!-- Location Selector & Add Button -->
+            <div class="flex items-end gap-3 mb-4">
+              <div class="form-group flex-1">
+                <label class="label" for="locationSelect">Pilih Lokasi</label>
+                <div class="relative">
+                  <select
+                    id="locationSelect"
+                    class="input appearance-none pr-8 cursor-pointer"
+                    bind:value={selectedOfficeId}
+                    onchange={handleLocationChange}
+                    disabled={loadingOffices}
+                  >
+                    {#if loadingOffices}
+                      <option value="" disabled>Memuat lokasi...</option>
+                    {:else}
+                      {#each officeList as office}
+                        <option value={office.id}
+                          >{office.name}
+                          {office.id === activeOfficeId
+                            ? "(Aktif)"
+                            : ""}</option
+                        >
+                      {/each}
+                      <option value="new" class="text-blue-600 font-semibold"
+                        >+ Tambah Lokasi Baru...</option
+                      >
+                    {/if}
+                  </select>
+                  <div
+                    class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"
+                  >
+                    <span class="material-symbols-outlined text-sm"
+                      >expand_more</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Active Location Indicator -->
+            {#if selectedOfficeId === activeOfficeId && activeOfficeId}
+              <div
+                class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-3 mb-4"
+              >
+                <span class="material-symbols-outlined text-emerald-600"
+                  >check_circle</span
+                >
+                <p class="text-sm text-emerald-700 font-medium">
+                  Lokasi ini sedang aktif digunakan untuk presensi.
+                </p>
+              </div>
+            {/if}
+
+            <!-- Location Preview Grid -->
+            {#if currentOffice}
+              <div class="preview-box mb-4">
+                <div
+                  class="p-3 border-b border-slate-200 flex justify-between items-center"
+                >
+                  <h4 class="font-bold text-slate-700">{currentOffice.name}</h4>
+                  <span
+                    class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full border border-slate-200"
+                  >
+                    Radius: {currentOffice.radius_meters}m
+                  </span>
+                </div>
+                <div class="p-3 grid grid-cols-2 gap-4">
+                  <div>
+                    <span class="text-xs text-slate-500 block mb-1"
+                      >Latitude</span
+                    >
+                    <code
+                      class="text-sm block bg-white border border-slate-200 rounded px-2 py-1"
+                      >{currentOffice.latitude}</code
+                    >
+                  </div>
+                  <div>
+                    <span class="text-xs text-slate-500 block mb-1"
+                      >Longitude</span
+                    >
+                    <code
+                      class="text-sm block bg-white border border-slate-200 rounded px-2 py-1"
+                      >{currentOffice.longitude}</code
+                    >
+                  </div>
+                  <div class="col-span-2">
+                    <span class="text-xs text-slate-500 block mb-1">Alamat</span
+                    >
+                    <p class="text-sm text-slate-700">
+                      {currentOffice.address || "-"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Actions for Selected Location -->
+              <div
+                class="flex gap-3 justify-end border-t border-slate-100 pt-4"
+              >
+                {#if selectedOfficeId !== activeOfficeId}
+                  <button
+                    class="px-4 py-2 rounded-lg bg-slate-100 text-slate-600 font-medium text-sm hover:bg-slate-200 transition-colors"
+                    onclick={handleDeleteOffice}
+                    disabled={deletingOffice}
+                  >
+                    {deletingOffice ? "Menghapus..." : "Hapus"}
+                  </button>
+                  <button
+                    class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium text-sm hover:bg-indigo-700 transition-colors shadow-sm hover:shadow-md"
+                    onclick={handleSetActive}
+                    disabled={settingActive}
+                  >
+                    {settingActive
+                      ? "Mengatur..."
+                      : "Atur Sebagai Lokasi Aktif"}
+                  </button>
+                {/if}
+              </div>
+            {:else}
+              <div
+                class="text-center py-8 text-slate-400 bg-slate-50 rounded-xl border-dashed border-2 border-slate-200"
+              >
+                <span class="material-symbols-outlined text-4xl mb-2 opacity-50"
+                  >location_off</span
+                >
+                <p>Tidak ada lokasi yang dipilih.</p>
+              </div>
+            {/if}
+
+            <div class="info-box mt-4">
               <div class="icon-circle bg-emerald-light text-emerald">
                 <span class="material-symbols-outlined">satellite_alt</span>
               </div>
               <div>
                 <h4 class="info-title">Tips</h4>
                 <p class="info-desc">
-                  Ambil koordinat dari Google Maps (klik kanan titik kantor,
-                  salin koordinat).
+                  Pastikan koordinat akurat. Gunakan Google Maps untuk menyalin
+                  lat/lng.
                 </p>
               </div>
             </div>
@@ -460,6 +676,159 @@
       </div>
     {/if}
   </div>
+
+  <!-- Add Location Modal -->
+  {#if showAddModal}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
+      onclick={closeAddModal}
+      role="button"
+      tabindex="0"
+      onkeydown={handleKeydown}
+    >
+      <div
+        class="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-scale-up"
+        onclick={(e) => e.stopPropagation()}
+        role="button"
+        tabindex="0"
+        onkeydown={handleKeydown}
+      >
+        <div
+          class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50"
+        >
+          <h3 class="font-bold text-lg text-slate-800">Tambah Lokasi Baru</h3>
+          <button
+            onclick={closeAddModal}
+            class="text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <div class="p-6 space-y-4">
+          <!-- Search Box -->
+          <div class="form-group relative">
+            <label class="label" for="search-place"
+              >Cari Lokasi (Google Maps)</label
+            >
+            <div class="flex gap-2">
+              <input
+                id="search-place"
+                class="input"
+                type="text"
+                placeholder="Contoh: Simpang Lima Semarang"
+                onkeydown={(e) =>
+                  e.key === "Enter" && searchPlaces(e.currentTarget.value)}
+              />
+              <button
+                class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                onclick={(e) => {
+                  const input = /** @type {HTMLInputElement | null} */ (
+                    document.getElementById("search-place")
+                  );
+                  if (input) searchPlaces(input.value);
+                }}
+                disabled={searchingPlaces}
+              >
+                {#if searchingPlaces}
+                  <span class="material-symbols-outlined animate-spin text-sm"
+                    >refresh</span
+                  >
+                {:else}
+                  <span class="material-symbols-outlined text-sm">search</span>
+                {/if}
+              </button>
+            </div>
+            {#if searchResults.length > 0}
+              <div
+                class="absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+              >
+                {#each searchResults as place}
+                  <button
+                    class="w-full text-left px-4 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-0"
+                    onclick={() => selectPlace(place)}
+                  >
+                    <div class="font-medium text-slate-700 text-sm">
+                      {place.name}
+                    </div>
+                    <div class="text-xs text-slate-500 truncate">
+                      {place.address}
+                    </div>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <div class="relative py-2">
+            <div class="absolute inset-0 flex items-center">
+              <div class="w-full border-t border-slate-200"></div>
+            </div>
+            <div class="relative flex justify-center text-sm">
+              <span class="px-2 bg-white text-slate-500">Atau isi manual</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="label" for="new-name">Nama Kantor</label>
+            <input
+              id="new-name"
+              class="input"
+              type="text"
+              bind:value={newOffice.name}
+              placeholder="Contoh: Kantor Cabang A"
+            />
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="form-group">
+              <label class="label" for="new-lat">Latitude</label>
+              <input
+                id="new-lat"
+                class="input"
+                type="text"
+                bind:value={newOffice.latitude}
+                placeholder="-7.xxxxx"
+              />
+            </div>
+            <div class="form-group">
+              <label class="label" for="new-lng">Longitude</label>
+              <input
+                id="new-lng"
+                class="input"
+                type="text"
+                bind:value={newOffice.longitude}
+                placeholder="110.xxxxx"
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="label" for="new-address">Alamat Lengkap</label>
+            <textarea
+              id="new-address"
+              class="input min-h-[80px]"
+              bind:value={newOffice.address}
+              placeholder="Jalan..."
+            ></textarea>
+          </div>
+        </div>
+        <div
+          class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3"
+        >
+          <button
+            class="px-4 py-2 rounded-lg text-slate-600 font-medium hover:bg-slate-200 transition-colors"
+            onclick={closeAddModal}>Batal</button
+          >
+          <button
+            class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 transition-colors shadow-sm"
+            onclick={handleAddOffice}
+            disabled={creatingOffice}
+          >
+            {creatingOffice ? "Menambahkan..." : "Tambah Lokasi"}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -674,11 +1043,33 @@
     box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2);
     transition: 0.2s;
   }
+
+  .btn-blue {
+    background: #4f46e5;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+
   .btn-primary:hover:not(:disabled) {
     transform: translateY(-1px);
     box-shadow: 0 6px 12px rgba(16, 185, 129, 0.3);
   }
   .btn-primary:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+
+  .btn-blue:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 12px rgba(79, 70, 229, 0.2);
+  }
+  .btn-blue:disabled {
     opacity: 0.7;
     cursor: not-allowed;
   }
