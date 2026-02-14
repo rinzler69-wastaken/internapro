@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"dsi_interna_sys/internal/config"
@@ -27,16 +28,36 @@ func (h *DashboardHandler) GetInternDashboard(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if claims.Role != "intern" {
-		utils.RespondForbidden(w, "Only interns can access this dashboard")
+	// Allow intern, admin, supervisor, pembimbing
+	role := normalizeRole(claims.Role)
+	if role != "intern" && role != "admin" && role != "supervisor" && role != "pembimbing" {
+		utils.RespondForbidden(w, "Access denied")
 		return
 	}
 
 	var internID int64
-	err := h.db.QueryRow("SELECT id FROM interns WHERE user_id = ?", claims.UserID).Scan(&internID)
-	if err != nil {
-		utils.RespondNotFound(w, "Intern not found")
-		return
+	internIDStr := r.URL.Query().Get("intern_id")
+	var err error
+
+	if role == "intern" {
+		// For interns, always resolve ID from their user account to prevent ID DoR
+		err = h.db.QueryRow("SELECT id FROM interns WHERE user_id = ?", claims.UserID).Scan(&internID)
+		if err != nil {
+			utils.RespondNotFound(w, "Intern not found")
+			return
+		}
+	} else {
+		// For admin/supervisor, require intern_id param
+		if internIDStr == "" {
+			utils.RespondBadRequest(w, "intern_id parameter is required for non-intern roles")
+			return
+		}
+		// Parse param
+		internID, err = strconv.ParseInt(internIDStr, 10, 64)
+		if err != nil {
+			utils.RespondBadRequest(w, "Invalid intern_id format")
+			return
+		}
 	}
 
 	cfg := config.Loaded

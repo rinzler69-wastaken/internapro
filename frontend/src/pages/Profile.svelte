@@ -3,6 +3,7 @@
   import Chart from "chart.js/auto";
   import { api } from "../lib/api.js";
   import { auth } from "../lib/auth.svelte.js";
+  import { getAvatarUrl } from "../lib/utils.js";
 
   let loading = $state(true);
   let error = $state(null);
@@ -348,14 +349,18 @@
     }
 
     if (assessmentData && radarChartEl) {
+      // COPY data to avoid Svelte proxy issues with Chart.js
+      const labels = [...assessmentData.labels];
+      const dataValues = [...assessmentData.values];
+
       radarChart = new Chart(radarChartEl, {
         type: "radar",
         data: {
-          labels: assessmentData.labels,
+          labels: labels,
           datasets: [
             {
               label: "Skor Rata-rata",
-              data: assessmentData.values,
+              data: dataValues,
               backgroundColor: "rgba(99, 102, 241, 0.2)",
               borderColor: "rgba(99, 102, 241, 1)",
               borderWidth: 2,
@@ -433,16 +438,6 @@
     if (status === "cancelled")
       return { text: "Dibatalkan", cls: "badge-danger" };
     return { text: status || "-", cls: "badge-muted" };
-  }
-
-  function avatarUrl(path) {
-    if (!path) return null;
-    if (path.startsWith("http")) return path;
-    const base = path.startsWith("/uploads/") ? path : `/uploads/${path}`;
-    const qs = [];
-    if (auth.token) qs.push(`token=${auth.token}`);
-    qs.push(`t=${Date.now()}`);
-    return `${base}${base.includes("?") ? "&" : "?"}${qs.join("&")}`;
   }
 
   const isSupervisor = $derived(
@@ -570,17 +565,17 @@
         <button class="btn primary" onclick={load}>Coba Lagi</button>
       </div>
     {:else}
-      <div class="card hero">
+      <div class="card hero animate-slide-up">
         <div class="hero-left">
           <div class="avatar">
-            {#if avatarUrl(user?.avatar)}
+            {#if getAvatarUrl(user?.avatar)}
               <img
-                src={avatarUrl(user?.avatar)}
+                src={getAvatarUrl(user?.avatar)}
                 alt="avatar"
                 referrerpolicy="no-referrer"
               />
             {:else}
-              <div class="avatar-placeholder">
+              <div class="avatar-placeholder bg-slate-900">
                 {user?.name?.[0]?.toUpperCase() || "U"}
               </div>
             {/if}
@@ -614,7 +609,7 @@
 
       {#if intern}
         <!-- Stats -->
-        <div class="grid stats">
+        <div class="grid stats animate-slide-up" style="animation-delay: 0.1s;">
           <div class="stat-card indigo">
             <div class="stat-label">Tugas Selesai</div>
             <div class="stat-value">
@@ -651,7 +646,10 @@
         </div>
 
         <!-- Charts -->
-        <div class="grid charts">
+        <div
+          class="grid charts animate-slide-up"
+          style="animation-delay: 0.2s;"
+        >
           <div class="card chart-card">
             <div class="card-head">
               <h3>Status Pekerjaan</h3>
@@ -670,24 +668,49 @@
               <canvas bind:this={attendanceChartEl}></canvas>
             </div>
           </div>
-        </div>
 
-        {#if assessmentData}
-          <div class="card chart-card radar">
+          <!-- Radar Chart -->
+          <div
+            class="card chart-card radar animate-slide-up"
+            style="animation-delay: 0.3s;"
+          >
             <div class="card-head">
               <h3>Radar Penilaian (5 terbaru)</h3>
-              <span class="badge indigo">Radar</span>
+              <!-- <span class="badge indigo">Radar</span> -->
             </div>
             <div class="chart-wrap tall">
-              <canvas bind:this={radarChartEl}></canvas>
+              {#if assessmentData}
+                <canvas bind:this={radarChartEl}></canvas>
+              {:else}
+                <div class="empty-chart">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="48"
+                    height="48"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#cbd5e1"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    ><path d="M3 3v18h18"></path><path
+                      d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"
+                    ></path></svg
+                  >
+                  <p>Belum ada data penilaian</p>
+                </div>
+              {/if}
             </div>
           </div>
-        {/if}
+        </div>
       {/if}
 
       {#if intern || isSupervisor}
         <!-- Details -->
-        <div class="grid details">
+        <div
+          class="grid details animate-slide-up"
+          style="animation-delay: 0.4s;"
+        >
           <div class="card">
             <div class="card-head">
               <h3>Informasi Pribadi</h3>
@@ -717,7 +740,7 @@
           </div>
         </div>
       {:else}
-        <div class="card">
+        <div class="card animate-slide-up" style="animation-delay: 0.4s;">
           <div class="card-head">
             <h3>Informasi Akun</h3>
           </div>
@@ -763,10 +786,6 @@
 
   .page {
     min-height: 100vh;
-    /* background: */
-    /* radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.06) 0, transparent 45%),
-      radial-gradient(at 100% 20%, rgba(16, 185, 129, 0.07) 0, transparent 35%),
-      #f8fafc; */
     padding: 0px;
   }
 
@@ -1229,6 +1248,23 @@
     .hero-right {
       width: 100%;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+  }
+
+  /* Slide Up Animation */
+  .animate-slide-up {
+    opacity: 0;
+    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 </style>

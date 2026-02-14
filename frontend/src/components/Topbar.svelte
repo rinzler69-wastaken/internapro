@@ -1,6 +1,7 @@
 <script>
   import { auth } from "../lib/auth.svelte.js";
   import { api } from "../lib/api.js";
+  import { getAvatarUrl } from "../lib/utils.js";
   import { goto } from "@mateothegreat/svelte5-router";
   import { location } from "../lib/location.js";
   import { isMobileSidebarOpen, isSidebarCollapsed } from "../lib/ui.store.js";
@@ -37,7 +38,7 @@
       : "/settings",
   );
   const displayName = $derived(auth.user?.name || auth.user?.email || "Anda");
-  const avatarSrc = $derived(buildAvatarUrl(auth.user?.avatar));
+  const avatarSrc = $derived(getAvatarUrl(auth.user?.avatar));
 
   let notifications = $state([]);
   let unreadCount = $state(0);
@@ -92,7 +93,7 @@
       return `Perbarui informasi pribadi dan preferensi, ${name}.`;
     }
     if (routePath.startsWith("/calendar")) {
-      return "Ringkasan jadwal tugas dan presensi.";
+      return "Double-click atau klik plus untuk menambahkan agenda.";
     }
     if (routePath.startsWith("/data-tools")) {
       return "Ekspor, impor, dan sinkronisasi data.";
@@ -101,16 +102,6 @@
   }
 
   const currentSubtitle = $derived(getSubtitle(path, role, displayName));
-
-  function buildAvatarUrl(path) {
-    if (!path) return "";
-    // Pass through external URLs (e.g., Google avatar)
-    if (path.startsWith("http")) return path;
-    const clean = path.startsWith("/uploads/") ? path : `/uploads/${path}`;
-    const token = auth.token;
-    const qs = token ? `${clean.includes("?") ? "&" : "?"}token=${token}` : "";
-    return `${clean}${qs}`;
-  }
 
   async function fetchNotifications() {
     if (!auth.token || !auth.user) return;

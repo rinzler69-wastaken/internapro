@@ -17,15 +17,16 @@ type Attendance struct {
 	CheckOutLatitude  *float64   `json:"check_out_latitude"`
 	CheckOutLongitude *float64   `json:"check_out_longitude"`
 
-	Status        string   `json:"status"`
-	LateReason    *string  `json:"late_reason"`
-	Notes         *string  `json:"notes,omitempty"`
-	DistanceMeters *int    `json:"distance_meters,omitempty"`
-	ProofFile     *string  `json:"proof_file,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	Status         string    `json:"status"`
+	LateReason     *string   `json:"late_reason"`
+	Notes          *string   `json:"notes,omitempty"`
+	DistanceMeters *int      `json:"distance_meters,omitempty"`
+	ProofFile      *string   `json:"proof_file,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 
-	InternName string `json:"intern_name,omitempty"`
+	InternName   string `json:"intern_name,omitempty"`
+	InternAvatar string `json:"intern_avatar,omitempty"`
 }
 
 type CheckInRequest struct {

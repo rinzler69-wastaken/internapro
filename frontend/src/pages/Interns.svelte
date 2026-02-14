@@ -4,6 +4,7 @@
   import { api } from "../lib/api.js";
   import { portal } from "../lib/portal.js";
   import { auth } from "../lib/auth.svelte.js";
+  import { getAvatarUrl } from "../lib/utils.js";
   // import  attach  from 'svelte';
 
   // State
@@ -17,6 +18,7 @@
   let filterStatus = $state("");
   let currentPage = $state(1);
   let totalPages = $state(1);
+  let totalItems = $state(0);
   let searchTimeout;
   let expandedInterns = $state({});
 
@@ -84,9 +86,10 @@
       const res = await api.getInterns(params);
       interns = res.data || [];
       const pagination = res.pagination || {};
+
       totalPages = Math.max(pagination.total_pages || 1, 1);
+      totalItems = pagination.total_items || 0;
       currentPage = pagination.page || currentPage;
-      console.log("Fetched interns:", interns); // Debug log
     } catch (err) {
       console.error("Failed to fetch interns:", err);
       alert("Gagal memuat data intern: " + err.message);
@@ -117,7 +120,6 @@
     try {
       const res = await api.getSupervisors({ status: "active", limit: 200 });
       supervisors = res.data || [];
-      console.log("Fetched supervisors:", supervisors); // Debug log
     } catch (err) {
       console.error("Failed to load supervisors", err);
       alert("Gagal memuat data pembimbing: " + err.message);
@@ -155,11 +157,8 @@
       supervisor_id: supervisorId,
     };
 
-    console.log("Creating intern with payload:", payload); // Debug log
-
     try {
       const result = await api.createIntern(payload);
-      console.log("Create result:", result); // Debug log
       alert("Berhasil menambah intern!");
 
       // Reset form setelah berhasil
@@ -224,11 +223,8 @@
       payload.password = editForm.password;
     }
 
-    console.log("Updating intern with payload:", payload); // Debug log
-
     try {
       const result = await api.updateIntern(editing.id, payload);
-      console.log("Update result:", result); // Debug log
       alert("Data intern berhasil diperbarui");
       closeEditModal();
       await fetchInterns();
@@ -240,7 +236,6 @@
 
   function startEdit(intern) {
     editing = intern;
-    console.log("Editing intern:", intern); // Debug log
     editForm = {
       email: intern.email || "",
       password: "",
@@ -329,7 +324,7 @@
 <div class="page-container animate-fade-in">
   <div class="flex items-center gap-3 pb-8">
     <h4 class="card-title">Daftar Intern</h4>
-    <span class="badge-count">{interns.length} Siswa</span>
+    <span class="badge-count">{interns.length} dari {totalItems} Siswa</span>
   </div>
 
   <!-- BAGIAN TABEL DAFTAR -->
@@ -337,7 +332,7 @@
     <div class="card-header-row border-b">
       <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
         <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm flex items-center justify-center gap-2"
+          class="cursor-pointer flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm flex items-center justify-center gap-2"
           onclick={() => (showCreateModal = true)}
         >
           <svg
@@ -380,9 +375,17 @@
           <span>Refresh</span>
         </button>
       </div>
-      <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
+      <div
+        class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2 {totalPages <=
+        1
+          ? 'opacity-50 pointer-events-none'
+          : ''}"
+      >
         <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {currentPage <=
+          1
+            ? 'opacity-50 cursor-not-allowed'
+            : 'cursor-pointer'}"
           onclick={goToPreviousPage}
           disabled={currentPage <= 1}
         >
@@ -409,7 +412,10 @@
         </div>
 
         <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {currentPage >=
+          totalPages
+            ? 'opacity-50 cursor-not-allowed'
+            : 'cursor-pointer'}"
           onclick={goToNextPage}
           disabled={currentPage >= totalPages}
         >
@@ -500,10 +506,24 @@
           </thead>
           <tbody>
             {#each interns as i}
-              <tr class="table-row">
+              <tr
+                class="table-row {i.status === 'pending'
+                  ? 'bg-yellow-50/50 hover:bg-yellow-50'
+                  : ''}"
+              >
                 <td>
                   <div class="user-info">
-                    <div class="avatar-placeholder">A</div>
+                    {#if i.avatar && getAvatarUrl(i.avatar)}
+                      <img
+                        src={getAvatarUrl(i.avatar)}
+                        alt={i.full_name}
+                        class="w-10 h-10 object-cover rounded-full shadow-sm"
+                      />
+                    {:else}
+                      <div class="avatar-placeholder bg-slate-900">
+                        {i.full_name ? i.full_name[0].toUpperCase() : "?"}
+                      </div>
+                    {/if}
                     <div class="user-details">
                       <span class="user-name">{i.full_name || "-"}</span>
                     </div>
@@ -521,52 +541,54 @@
                 </td>
                 <td class="text-right">
                   {#if i.status === "pending"}
-                    <button
-                      class="btn-icon btn-deny flex-1"
-                      onclick={() => handleDeny(i.id, i.full_name)}
-                      title="Tolak & Hapus"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><line x1="18" y1="6" x2="6" y2="18"></line><line
-                          x1="6"
-                          y1="6"
-                          x2="18"
-                          y2="18"
-                        ></line></svg
+                    <div class="flex items-center justify-end gap-2">
+                      <button
+                        class="btn-icon btn-deny flex-1"
+                        onclick={() => handleDeny(i.id, i.full_name)}
+                        title="Tolak & Hapus"
                       >
-                      <span class="btn-label">Tolak</span>
-                    </button>
-                    <button
-                      class="btn-icon btn-approve flex-1"
-                      onclick={() => handleApprove(i.id, i.full_name)}
-                      title="Setujui Siswa Ini"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><polyline points="20 6 9 17 4 12"></polyline></svg
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          ><line x1="18" y1="6" x2="6" y2="18"></line><line
+                            x1="6"
+                            y1="6"
+                            x2="18"
+                            y2="18"
+                          ></line></svg
+                        >
+                        <span class="btn-label">Tolak</span>
+                      </button>
+                      <button
+                        class="btn-icon btn-approve flex-1"
+                        onclick={() => handleApprove(i.id, i.full_name)}
+                        title="Setujui Siswa Ini"
                       >
-                      <span class="btn-label">Terima</span>
-                    </button>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          ><polyline points="20 6 9 17 4 12"></polyline></svg
+                        >
+                        <span class="btn-label">Terima</span>
+                      </button>
+                    </div>
                   {:else}
                     <a
-                      class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100"
+                      class="btn-icon text-sky-600 hover:text-sky-700 bg-sky-50 hover:bg-sky-100"
                       href={`/interns/${i.id}/details`}
                       title="Lihat Detail"
                     >
@@ -610,24 +632,18 @@
                       title="Hapus"
                     >
                       <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="14"
-                        height="14"
+                        width="18"
+                        height="18"
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
                         stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><polyline points="3 6 5 6 21 6"></polyline><path
-                          d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                        /><line x1="10" y1="11" x2="10" y2="17"></line><line
-                          x1="14"
-                          y1="11"
-                          x2="14"
-                          y2="17"
-                        ></line></svg
                       >
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path
+                          d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                        ></path>
+                      </svg>
                     </button>
                   {/if}
                 </td>
@@ -638,14 +654,26 @@
       </div>
       <div class="mobile-list">
         {#each interns as i}
-          <div class="entry-card">
+          <div
+            class="entry-card {i.status === 'pending'
+              ? 'bg-yellow-50 border-yellow-200'
+              : ''}"
+          >
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="entry-head" onclick={() => toggleExpand(i.id)}>
               <div class="user-info">
-                <div class="avatar-placeholder">
-                  {i.full_name ? i.full_name[0].toUpperCase() : "?"}
-                </div>
+                {#if i.avatar && getAvatarUrl(i.avatar)}
+                  <img
+                    src={getAvatarUrl(i.avatar)}
+                    alt={i.full_name}
+                    class="w-10 h-10 object-cover rounded-full shadow-sm"
+                  />
+                {:else}
+                  <div class="avatar-placeholder bg-slate-900">
+                    {i.full_name ? i.full_name[0].toUpperCase() : "?"}
+                  </div>
+                {/if}
                 <div class="user-details">
                   <div class="user-name">{i.full_name || "-"}</div>
                   <div class="text-muted small">{i.email || "-"}</div>
@@ -664,39 +692,41 @@
 
             {#if expandedInterns[i.id]}
               <div class="entry-details" transition:slide={{ duration: 200 }}>
-                <div class="detail-row">
-                  <div class="detail-label">STATUS</div>
-                  <span
-                    class={`status-badge equal-badge ${i.status === "active" ? "bg-emerald-100 text-emerald-700" : i.status === "pending" ? "bg-yellow-100 text-yellow-700" : "bg-slate-100 text-slate-600"}`}
-                  >
-                    {i.status || "inactive"}
-                  </span>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">SEKOLAH</div>
-                  <div class="detail-value">
-                    {i.school || i.institution_name || "-"}
+                <div class="details-grid">
+                  <div class="detail-box col-span-2 inline-box">
+                    <div class="label">Status</div>
+                    <span
+                      class={`status-badge equal-badge ${i.status === "active" ? "bg-emerald-100 text-emerald-700" : i.status === "pending" ? "bg-yellow-100 text-yellow-700" : "bg-slate-100 text-slate-600"}`}
+                    >
+                      {i.status || "inactive"}
+                    </span>
                   </div>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">JURUSAN</div>
-                  <div class="detail-value">{i.department || "-"}</div>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">MULAI</div>
-                  <div class="detail-value">
-                    {i.start_date ? i.start_date.slice(0, 10) : "-"}
+                  <div class="detail-box">
+                    <div class="label">Sekolah</div>
+                    <div class="value">
+                      {i.school || i.institution_name || "-"}
+                    </div>
                   </div>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">SELESAI</div>
-                  <div class="detail-value">
-                    {i.end_date ? i.end_date.slice(0, 10) : "-"}
+                  <div class="detail-box">
+                    <div class="label">Jurusan</div>
+                    <div class="value">{i.department || "-"}</div>
                   </div>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">PEMBIMBING</div>
-                  <div class="detail-value">{i.supervisor_name || "-"}</div>
+                  <div class="detail-box">
+                    <div class="label">Mulai</div>
+                    <div class="value">
+                      {i.start_date ? i.start_date.slice(0, 10) : "-"}
+                    </div>
+                  </div>
+                  <div class="detail-box">
+                    <div class="label">Selesai</div>
+                    <div class="value">
+                      {i.end_date ? i.end_date.slice(0, 10) : "-"}
+                    </div>
+                  </div>
+                  <div class="detail-box col-span-2">
+                    <div class="label">Pembimbing</div>
+                    <div class="value">{i.supervisor_name || "-"}</div>
+                  </div>
                 </div>
 
                 <div class="mobile-actions mt-4 pt-4 border-t border-slate-100">
@@ -731,14 +761,14 @@
                       <span class="btn-text">Detail</span>
                     </a>
                     <button
-                      class="mini-btn mobile"
+                      class="mini-btn-circle mobile"
                       onclick={(e) => {
                         e.stopPropagation();
                         startEdit(i);
                       }}
                     >
                       <span class="material-symbols-outlined">edit</span>
-                      <span class="btn-text">Edit</span>
+                      <span class="btn-text"></span>
                     </button>
                     <button
                       class="mini-btn mobile danger"
@@ -1246,7 +1276,7 @@
   .btn-approve {
     display: inline-flex;
     align-items: center;
-    background-color: #10b981;
+    background-color: transparent;
     color: white;
     border: none;
     padding: 6px 10px;
@@ -1255,19 +1285,19 @@
     font-weight: 700;
     cursor: pointer;
     transition: all 0.2s;
-    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+    /* box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2); */
   }
 
   .btn-approve:hover {
-    background-color: #059669;
-    box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);
+    color: #059669;
+    /* box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3); */
     /* transform: translateY(-1px); */
   }
 
   .btn-deny {
     display: inline-flex;
     align-items: center;
-    background-color: white;
+    background-color: transparent;
     color: #ef4444;
     border: 1px solid #ef4444;
     padding: 6px 10px;
@@ -1279,9 +1309,9 @@
   }
 
   .btn-deny:hover {
-    background-color: #ef4444;
-    color: white;
-    box-shadow: 0 4px 6px rgba(239, 68, 68, 0.3);
+    /* background-color: #ef4444; */
+    color: df3434;
+    /* box-shadow: 0 4px 6px rgba(239, 68, 68, 0.3); */
     /* transform: translateY(-1px); */
   }
 
@@ -1604,6 +1634,12 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    transition: all 0.2s;
   }
   .btn-label {
     display: none;
@@ -1685,12 +1721,12 @@
     .mobile-list {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      /* gap: 12px; */
     }
     .entry-card {
       padding: 14px;
-      border-radius: 16px;
-      border: 1px solid #e2e8f0;
+      border-radius: 0px;
+      border-top: 1px solid #e2e8f0;
       background: #ffffff;
       box-shadow: 0 6px 20px -18px rgba(15, 23, 42, 0.3);
     }
@@ -1727,7 +1763,27 @@
       height: 40px;
       font-size: 1rem;
       flex-shrink: 0;
+      border-radius: 50%;
+      overflow: hidden;
+      background-color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #64748b;
+      font-weight: 600;
+      position: relative; /* For img absolute positioning if needed, or just standard flow */
     }
+
+    .entry-head .avatar-placeholder.bg-slate-900 {
+      background-color: #0f172a;
+      color: #ffffff;
+    }
+
+    .entry-head .avatar-placeholder.bg-slate-900 {
+      background-color: #0f172a;
+      color: #ffffff;
+    }
+
     .entry-details {
       margin-top: 16px;
       padding-top: 16px;
@@ -1794,6 +1850,25 @@
       flex: 1;
       justify-content: center;
     }
+
+    .mini-btn-circle {
+      display: inline-flex;
+      align-items: center;
+      /* gap: 6px; */
+      /* padding: 8px 16px; */
+      border-radius: 9999px;
+      border: 1px solid #0f172a;
+      background: #0f172a;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      width: 42px;
+      height: 42px;
+      /* flex: 1; */
+      justify-content: center;
+    }
     .mini-btn .btn-text {
       display: inline;
     }
@@ -1851,5 +1926,48 @@
   .btn-icon:hover {
     background: #e2e8f0;
     color: #0f172a;
+  }
+  /* Mobile Grid Styles */
+  @media (max-width: 900px) {
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .detail-box {
+      padding: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #f8fafc;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .detail-box.col-span-2 {
+      grid-column: span 2 / span 2;
+    }
+    .detail-box.inline-box {
+      flex-direction: row;
+      gap: 8px;
+    }
+    .detail-box.inline-box .label {
+      margin: 0;
+    }
+    .detail-box .label {
+      margin: 0 0 6px 0;
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .detail-box .value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+    }
   }
 </style>

@@ -27,9 +27,11 @@ type Assessment struct {
 	UpdatedAt          time.Time      `json:"updated_at"`
 
 	// Related data
-	InternName   string `json:"intern_name,omitempty"`
-	AssessorName string `json:"assessor_name,omitempty"`
-	TaskTitle    string `json:"task_title,omitempty"`
+	InternName     string `json:"intern_name,omitempty"`
+	InternAvatar   string `json:"intern_avatar,omitempty"`
+	AssessorName   string `json:"assessor_name,omitempty"`
+	AssessorAvatar string `json:"assessor_avatar,omitempty"`
+	TaskTitle      string `json:"task_title,omitempty"`
 }
 
 type CreateAssessmentRequest struct {

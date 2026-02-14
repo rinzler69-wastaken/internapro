@@ -139,17 +139,51 @@ func (h *SettingHandler) GetOfficeInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only fetch office-related settings that are safe for interns to see
+	// Try to get active_office_id from settings
+	var activeIdStr string
+	err := h.db.QueryRow("SELECT `value` FROM settings WHERE `key` = 'active_office_id'").Scan(&activeIdStr)
+
+	officeInfo := make(map[string]string)
+
+	// Always fetch global max_checkin_distance first
+	var globalRadius string
+	h.db.QueryRow("SELECT `value` FROM settings WHERE `key` = 'max_checkin_distance'").Scan(&globalRadius)
+	if globalRadius == "" {
+		globalRadius = "100" // Default
+	}
+	officeInfo["max_checkin_distance"] = globalRadius
+	officeInfo["office_radius"] = globalRadius // legacy
+
+	if err == nil && activeIdStr != "" {
+		// Fetch from office_locations
+		var name, address string
+		var lat, lng float64
+		// Radius is fetched from global settings now, so we don't need it from the table for this response.
+		err = h.db.QueryRow("SELECT name, latitude, longitude, address FROM office_locations WHERE id = ?", activeIdStr).
+			Scan(&name, &lat, &lng, &address)
+
+		if err == nil {
+			officeInfo["office_name"] = name
+			officeInfo["office_latitude"] = fmt.Sprintf("%f", lat)
+			officeInfo["office_longitude"] = fmt.Sprintf("%f", lng)
+			officeInfo["office_address"] = address
+
+			utils.RespondSuccess(w, "Office info retrieved", officeInfo)
+			return
+		}
+	}
+
+	// Fallback to legacy settings if no active office or lookup failed
 	allowedKeys := []string{
 		"office_name",
 		"office_latitude",
 		"office_longitude",
-		"max_checkin_distance",
-		"office_radius", // legacy support
+		//"max_checkin_distance", // Already fetched
+		//"office_radius", // Already fetched
 	}
 
-	query := "SELECT `key`, `value` FROM settings WHERE `key` IN (?, ?, ?, ?, ?)"
-	rows, err := h.db.Query(query, allowedKeys[0], allowedKeys[1], allowedKeys[2], allowedKeys[3], allowedKeys[4])
+	query := "SELECT `key`, `value` FROM settings WHERE `key` IN (?, ?, ?)"
+	rows, err := h.db.Query(query, allowedKeys[0], allowedKeys[1], allowedKeys[2])
 	if err != nil {
 		log.Printf("office info query failed: %v", err)
 		utils.RespondInternalError(w, "Failed to fetch office info: "+err.Error())
@@ -157,7 +191,6 @@ func (h *SettingHandler) GetOfficeInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	officeInfo := make(map[string]string)
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err == nil {

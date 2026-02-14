@@ -94,7 +94,7 @@ func (h *SupervisorHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 		SELECT s.id, s.user_id, s.full_name, s.nip, s.phone, s.position, s.address, s.institution,
-		       s.status, s.created_at, s.updated_at, u.email, u.name,
+		       s.status, s.created_at, s.updated_at, u.email, u.name, u.avatar,
 		       (SELECT COUNT(*) FROM interns i WHERE i.supervisor_id = s.user_id) as interns_count
 		FROM supervisors s
 		JOIN users u ON s.user_id = u.id
@@ -115,7 +115,7 @@ func (h *SupervisorHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		var email, userName string
 		if err := rows.Scan(
 			&s.ID, &s.UserID, &s.FullName, &nip, &phone, &position, &address, &institution,
-			&s.Status, &s.CreatedAt, &s.UpdatedAt, &email, &userName, &s.InternsCount,
+			&s.Status, &s.CreatedAt, &s.UpdatedAt, &email, &userName, &s.Avatar, &s.InternsCount,
 		); err != nil {
 			continue
 		}
@@ -143,7 +143,7 @@ func (h *SupervisorHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	var email, userName string
 	query := `
 		SELECT s.id, s.user_id, s.full_name, s.nip, s.phone, s.position, s.address, s.institution,
-		       s.status, s.created_at, s.updated_at, u.email, u.name,
+		       s.status, s.created_at, s.updated_at, u.email, u.name, u.avatar,
 		       (SELECT COUNT(*) FROM interns i WHERE i.supervisor_id = s.user_id) as interns_count
 		FROM supervisors s
 		JOIN users u ON s.user_id = u.id
@@ -151,7 +151,7 @@ func (h *SupervisorHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	`
 	if err := h.db.QueryRow(query, id).Scan(
 		&s.ID, &s.UserID, &s.FullName, &nip, &phone, &position, &address, &institution,
-		&s.Status, &s.CreatedAt, &s.UpdatedAt, &email, &userName, &s.InternsCount,
+		&s.Status, &s.CreatedAt, &s.UpdatedAt, &email, &userName, &s.Avatar, &s.InternsCount,
 	); err == sql.ErrNoRows {
 		utils.RespondNotFound(w, "Supervisor not found")
 		return

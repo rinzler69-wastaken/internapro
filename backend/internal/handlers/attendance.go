@@ -612,6 +612,8 @@ func (h *AttendanceHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	internFilter := strings.TrimSpace(r.URL.Query().Get("intern_id"))
 	month := strings.TrimSpace(r.URL.Query().Get("month"))
 
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+
 	where := []string{}
 	args := []interface{}{}
 
@@ -631,6 +633,10 @@ func (h *AttendanceHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if search != "" {
+		where = append(where, "u.name LIKE ?")
+		args = append(args, "%"+search+"%")
+	}
 	if date != "" {
 		where = append(where, "DATE(a.date) = ?")
 		args = append(args, date)
@@ -668,7 +674,7 @@ func (h *AttendanceHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, a.intern_id, a.date, a.check_in_time, a.check_in_latitude, a.check_in_longitude,
 		       a.check_out_time, a.check_out_latitude, a.check_out_longitude, a.status, a.late_reason,
 		       a.notes, a.distance_meters, a.proof_file, a.created_at, a.updated_at,
-		       u.name
+		       u.name, u.avatar
 	` + baseFrom + " " + whereClause + " ORDER BY a.date DESC, a.created_at DESC LIMIT ? OFFSET ?"
 
 	args = append(args, limit, offset)
@@ -687,7 +693,7 @@ func (h *AttendanceHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		var cila, cilo, cola, colo sql.NullFloat64
 		var lr, notes, proof sql.NullString
 		var dist sql.NullInt64
-		var internName sql.NullString
+		var internName, internAvatar sql.NullString
 
 		if err := rows.Scan(
 			&a.ID, &a.InternID, &a.Date,
@@ -695,7 +701,7 @@ func (h *AttendanceHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			&cot, &cola, &colo,
 			&a.Status, &lr,
 			&notes, &dist, &proof, &a.CreatedAt, &a.UpdatedAt,
-			&internName,
+			&internName, &internAvatar,
 		); err != nil {
 			continue
 		}
@@ -715,6 +721,9 @@ func (h *AttendanceHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		}
 		if internName.Valid {
 			a.InternName = internName.String
+		}
+		if internAvatar.Valid {
+			a.InternAvatar = internAvatar.String
 		}
 
 		records = append(records, a)
@@ -737,7 +746,7 @@ func (h *AttendanceHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, a.intern_id, a.date, a.check_in_time, a.check_in_latitude, a.check_in_longitude,
 		       a.check_out_time, a.check_out_latitude, a.check_out_longitude, a.status, a.late_reason,
 		       a.notes, a.distance_meters, a.proof_file, a.created_at, a.updated_at,
-		       u.name
+		       u.name, u.avatar
 		FROM attendances a
 		LEFT JOIN interns i ON a.intern_id = i.id
 		LEFT JOIN users u ON i.user_id = u.id
@@ -749,7 +758,7 @@ func (h *AttendanceHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	var cila, cilo, cola, colo sql.NullFloat64
 	var lr, notes, proof sql.NullString
 	var dist sql.NullInt64
-	var internName sql.NullString
+	var internName, internAvatar sql.NullString
 
 	err := h.db.QueryRow(query, id).Scan(
 		&a.ID, &a.InternID, &a.Date,
@@ -757,7 +766,7 @@ func (h *AttendanceHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		&cot, &cola, &colo,
 		&a.Status, &lr,
 		&notes, &dist, &proof, &a.CreatedAt, &a.UpdatedAt,
-		&internName,
+		&internName, &internAvatar,
 	)
 	if err == sql.ErrNoRows {
 		utils.RespondNotFound(w, "Attendance not found")
@@ -791,6 +800,9 @@ func (h *AttendanceHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if internName.Valid {
 		a.InternName = internName.String
+	}
+	if internAvatar.Valid {
+		a.InternAvatar = internAvatar.String
 	}
 
 	utils.RespondSuccess(w, "Attendance retrieved", a)

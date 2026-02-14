@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { api } from "../lib/api.js";
   import { auth } from "../lib/auth.svelte.js";
+  import { getAvatarUrl } from "../lib/utils.js";
   import Chart from "chart.js/auto";
 
   // State
@@ -469,91 +470,97 @@
   {:else}
     <!-- Pending Registrations Card -->
     {#if auth.user?.role === "admin" && (dashboardData.pendingInternsList.length > 0 || dashboardData.pendingSupervisorsList.length > 0)}
-      <div class="card approval-card animate-slide-up">
-        <div class="approval-decoration"></div>
-        <div
-          class="pt-4 border-b border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-emerald-50/30"
-        >
-          <div class="flex items-center gap-3">
-            <div class="icon-pulse shrink-0">
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-              >
-                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="8.5" cy="7" r="4" />
-                <polyline points="17 11 19 13 23 9" />
-              </svg>
-            </div>
-            <div>
+      <div class="tasks-section approval-card animate-slide-up">
+        <div class="flex flex-col mb-4">
+          <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center gap-3">
+              <div class="p-2 bg-amber-50 rounded-lg text-amber-600">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="8.5" cy="7" r="4" />
+                  <polyline points="17 11 19 13 23 9" />
+                </svg>
+              </div>
               <h3 class="font-bold text-base sm:text-lg text-slate-800">
                 Pendaftaran Baru
               </h3>
-              <p class="text-xs sm:text-sm text-slate-600 mt-1">
-                {#if dashboardData.pendingRegistrations > 0 && dashboardData.pendingSupervisors > 0}
-                  <span class="count-badge"
-                    >{dashboardData.pendingRegistrations}</span
-                  >
-                  siswa,
-                  <span class="count-badge"
-                    >{dashboardData.pendingSupervisors}</span
-                  > pembimbing menunggu persetujuan.
-                {:else if dashboardData.pendingRegistrations > 0}
-                  <span class="count-badge"
-                    >{dashboardData.pendingRegistrations}</span
-                  > siswa menunggu persetujuan.
-                {:else}
-                  <span class="count-badge"
-                    >{dashboardData.pendingSupervisors}</span
-                  > pembimbing menunggu persetujuan.
-                {/if}
-              </p>
             </div>
+            <a href="/interns?status=pending" class="link-view-all">
+              Lihat Semua
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
+              </svg>
+            </a>
           </div>
-          <a href="/interns?status=pending" class="link-view-all shrink-0">
-            Lihat Semua
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
-            </svg>
-          </a>
+          <p class="pl-12 text-xs sm:text-sm text-slate-600 mt-1">
+            {#if dashboardData.pendingRegistrations > 0 && dashboardData.pendingSupervisors > 0}
+              <span class="count-badge"
+                >{dashboardData.pendingRegistrations}</span
+              >
+              siswa,
+              <span class="count-badge">{dashboardData.pendingSupervisors}</span
+              > pembimbing menunggu persetujuan.
+            {:else if dashboardData.pendingRegistrations > 0}
+              <span class="count-badge"
+                >{dashboardData.pendingRegistrations}</span
+              > siswa menunggu persetujuan.
+            {:else}
+              <span class="count-badge">{dashboardData.pendingSupervisors}</span
+              > pembimbing menunggu persetujuan.
+            {/if}
+          </p>
         </div>
 
-        <div class="p-3 sm:p-5 space-y-2">
+        <div class="task-grid">
           {#each dashboardData.pendingInternsList as intern}
-            <div class="approval-item">
-              <div class="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                <div class="avatar-initial shrink-0">
+            <div class="task-item">
+              <div
+                class="task-icon {intern.avatar
+                  ? 'p-0 overflow-hidden'
+                  : 'task-icon-emerald bg-emerald-50 border-emerald-600 border-2 text-emerald-600'}"
+              >
+                {#if intern.avatar}
+                  <img
+                    src={getAvatarUrl(intern.avatar)}
+                    alt={intern.full_name}
+                    class="w-full h-full object-cover"
+                  />
+                {:else}
                   {intern.full_name?.charAt(0) || "I"}
-                </div>
-                <div class="min-w-0 flex-1">
-                  <h4 class="font-semibold text-slate-800 text-sm truncate">
-                    {intern.full_name}
-                  </h4>
-                  <span class="text-xs text-slate-500 truncate block"
-                    >{intern.school || "-"} • {intern.department || "-"}</span
-                  >
-                </div>
+                {/if}
               </div>
-              <div class="flex gap-2 shrink-0 approval-buttons">
+              <div class="task-info">
+                <h4 class="font-semibold text-slate-800 text-sm truncate">
+                  {intern.full_name}
+                </h4>
+                <p class="text-xs text-slate-500">
+                  {intern.school || "-"} • {intern.department || "-"}
+                </p>
+              </div>
+
+              <div class="flex gap-1 shrink-0">
                 <button
-                  class="btn-deny"
+                  class="btn-icon deny"
                   onclick={() => handleDeny(intern.id, intern.full_name)}
-                  title="Tolak & Hapus"
+                  title="Tolak"
                 >
                   <svg
-                    width="14"
-                    height="14"
+                    width="16"
+                    height="16"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -562,53 +569,63 @@
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                   </svg>
-                  <span class="hidden sm:inline">Tolak</span>
                 </button>
                 <button
-                  class="btn-approve"
+                  class="btn-icon approve"
                   onclick={() => handleApprove(intern.id, intern.full_name)}
                   title="Terima"
                 >
                   <svg
-                    width="14"
-                    height="14"
+                    width="16"
+                    height="16"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    stroke-width="3"
+                    stroke-width="2"
                   >
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
-                  <span class="hidden sm:inline">Terima</span>
                 </button>
               </div>
             </div>
           {/each}
+
           {#each dashboardData.pendingSupervisorsList as supervisor}
-            <div class="approval-item">
-              <div class="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                <div class="avatar-initial supervisor-avatar shrink-0">
+            <div class="task-item">
+              <div
+                class="task-icon {supervisor.avatar
+                  ? 'p-0 overflow-hidden'
+                  : 'task-icon-purple bg-purple-100 border-purple-600 border-2 text-purple-600'}"
+              >
+                {#if supervisor.avatar}
+                  <img
+                    src={getAvatarUrl(supervisor.avatar)}
+                    alt={supervisor.full_name}
+                    class="w-full h-full object-cover"
+                  />
+                {:else}
                   {supervisor.full_name?.charAt(0) || "P"}
-                </div>
-                <div class="min-w-0 flex-1">
-                  <h4 class="font-semibold text-slate-800 text-sm truncate">
-                    {supervisor.full_name}
-                  </h4>
-                  <span class="text-xs text-slate-500 truncate block"
-                    >{supervisor.institution || "-"} • Pembimbing</span
-                  >
-                </div>
+                {/if}
               </div>
-              <div class="flex gap-2 shrink-0 approval-buttons">
+              <div class="task-info">
+                <h4 class="font-semibold text-slate-800 text-sm truncate">
+                  {supervisor.full_name}
+                </h4>
+                <p class="text-xs text-slate-500">
+                  {supervisor.institution || "-"} • Pembimbing
+                </p>
+              </div>
+
+              <div class="flex gap-1 shrink-0">
                 <button
-                  class="btn-deny"
+                  class="btn-icon deny"
                   onclick={() =>
                     handleDenySupervisor(supervisor.id, supervisor.full_name)}
-                  title="Tolak & Hapus"
+                  title="Tolak"
                 >
                   <svg
-                    width="14"
-                    height="14"
+                    width="16"
+                    height="16"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -617,10 +634,9 @@
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                   </svg>
-                  <span class="hidden sm:inline">Tolak</span>
                 </button>
                 <button
-                  class="btn-approve"
+                  class="btn-icon approve"
                   onclick={() =>
                     handleApproveSupervisor(
                       supervisor.id,
@@ -629,16 +645,15 @@
                   title="Terima"
                 >
                   <svg
-                    width="14"
-                    height="14"
+                    width="16"
+                    height="16"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    stroke-width="3"
+                    stroke-width="2"
                   >
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
-                  <span class="hidden sm:inline">Terima</span>
                 </button>
               </div>
             </div>
@@ -905,12 +920,6 @@
     border: 1px solid #e2e8f0;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
     overflow: hidden;
-  }
-
-  .approval-card {
-    position: relative;
-    border-color: rgba(16, 185, 129, 0.2);
-    box-shadow: 0 10px 30px -10px rgba(16, 185, 129, 0.15);
   }
 
   .approval-decoration {
@@ -1428,21 +1437,40 @@
 
   .task-item:hover {
     border-color: #cbd5e1;
-    transform: translateY(-2px);
+    /* transform: translateY(-2px); */
     box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.05);
   }
 
   .task-icon {
     width: 40px;
     height: 40px;
-    background: #f8fafc;
-    color: #64748b;
+    /* background: #f8fafc;
+    color: #64748b; */
     border-radius: 12px;
+    border: 1px solid #f1f5f9;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     transition: all 0.3s;
+  }
+
+  .task-icon-emerald {
+    border: 1px solid#0ac78b;
+  }
+
+  .task-icon-emerald:hover {
+    background: #0ac78b;
+    color: white;
+  }
+
+  .task-icon-purple {
+    border: 1px solid#9333ea;
+  }
+
+  .task-icon-purple:hover {
+    background: #9333ea;
+    color: white;
   }
 
   @media (min-width: 640px) {
@@ -1454,7 +1482,7 @@
 
   .task-item:hover .task-icon {
     background: #e0f2fe;
-    color: #0ea5e9;
+    /* color: #0ea5e9; */
   }
 
   .task-info {
@@ -1571,5 +1599,48 @@
     .task-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  /* New Button Styles */
+  .btn-icon {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #fff;
+  }
+  .btn-icon.approve {
+    border-color: #d1fae5;
+    color: #10b981;
+  }
+  .btn-icon.approve:hover {
+    background: #10b981;
+    border-color: #10b981;
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2);
+  }
+  .btn-icon.deny {
+    border-color: #fee2e2;
+    color: #ef4444;
+  }
+  .btn-icon.deny:hover {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.2);
+  }
+  .approval-card {
+    position: relative;
+    border: 1px solid rgba(245, 158, 11, 0.5) !important;
+    border-left: 4px solid #f59e0b !important;
+    background: #fffbeb !important; /* amber-50 */
+    box-shadow: 0 10px 30px -10px rgba(245, 158, 11, 0.2);
   }
 </style>

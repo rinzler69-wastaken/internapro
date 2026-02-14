@@ -466,6 +466,25 @@ export const api = {
     return request('/settings', { method: 'POST', body: JSON.stringify(payload) });
   },
 
+  // Office Locations
+  async getOffices() {
+    return request('/settings/offices');
+  },
+  async createOffice(payload) {
+    return request('/settings/offices', { method: 'POST', body: JSON.stringify(payload) });
+  },
+  async deleteOffice(id) {
+    return request(`/settings/offices/${id}`, { method: 'DELETE' });
+  },
+  async setActiveOffice(id) {
+    return request('/settings/offices/active', { method: 'POST', body: JSON.stringify({ id }) });
+  },
+
+  // Maps
+  async searchPlaces(query) {
+    return request(`/settings/places/search?q=${encodeURIComponent(query)}`);
+  },
+
   // Analytics Specific
   async getWeeklyTrends(internId, weekOffset = 0) {
     return request(`/analytics/trends/weekly/${internId}?week_offset=${weekOffset}`);
@@ -481,6 +500,21 @@ export const api = {
   async getHolidays(params = {}) {
     const query = new URLSearchParams(params).toString();
     return request(`/holidays${query ? `?${query}` : ''}`);
+  },
+
+  // Agendas
+  async getAgendas(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return request(`/agendas${query ? `?${query}` : ''}`);
+  },
+  async createAgenda(payload) {
+    return request('/agendas', { method: 'POST', body: JSON.stringify(payload) });
+  },
+  async updateAgenda(id, payload) {
+    return request(`/agendas/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  },
+  async deleteAgenda(id) {
+    return request(`/agendas/${id}`, { method: 'DELETE' });
   },
 };
 

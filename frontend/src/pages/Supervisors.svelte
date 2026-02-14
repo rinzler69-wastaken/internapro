@@ -4,6 +4,7 @@
   import { api } from "../lib/api.js";
   import { portal } from "../lib/portal.js";
   import { auth } from "../lib/auth.svelte.js";
+  import { getAvatarUrl } from "../lib/utils.js";
 
   // State
   let supervisors = $state([]);
@@ -15,6 +16,7 @@
   let filterStatus = $state("");
   let currentPage = $state(1);
   let totalPages = $state(1);
+  let totalItems = $state(0);
   let searchTimeout;
   let expandedSupervisors = $state({});
 
@@ -72,6 +74,7 @@
       supervisors = res.data || [];
       const pagination = res.pagination || {};
       totalPages = Math.max(pagination.total_pages || 1, 1);
+      totalItems = pagination.total_items || 0;
       currentPage = pagination.page || currentPage;
       console.log("Fetched supervisors:", supervisors);
     } catch (err) {
@@ -298,7 +301,9 @@
 <div class="page-container animate-fade-in">
   <div class="flex items-center gap-3 pb-8">
     <h4 class="card-title">Daftar Pembimbing</h4>
-    <span class="badge-count">{supervisors.length} Pembimbing</span>
+    <span class="badge-count"
+      >{supervisors.length} dari {totalItems} Pembimbing</span
+    >
   </div>
 
   <!-- BAGIAN TABEL DAFTAR -->
@@ -307,7 +312,7 @@
       <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
         {#if auth.user?.role === "admin"}
           <button
-            class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm flex items-center justify-center gap-2"
+            class="cursor-pointer flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm flex items-center justify-center gap-2"
             onclick={() => (showCreateModal = true)}
           >
             <svg
@@ -351,9 +356,17 @@
           <span>Refresh</span>
         </button>
       </div>
-      <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
+      <div
+        class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2 {totalPages <=
+        1
+          ? 'opacity-50 pointer-events-none'
+          : ''}"
+      >
         <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {currentPage <=
+          1
+            ? 'opacity-50 cursor-not-allowed'
+            : 'cursor-pointer'}"
           onclick={goToPreviousPage}
           disabled={currentPage <= 1}
         >
@@ -380,7 +393,10 @@
         </div>
 
         <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {currentPage >=
+          totalPages
+            ? 'opacity-50 cursor-not-allowed'
+            : 'cursor-pointer'}"
           onclick={goToNextPage}
           disabled={currentPage >= totalPages}
         >
@@ -471,16 +487,28 @@
           </thead>
           <tbody>
             {#each supervisors as s}
-              <tr class="table-row">
+              <tr
+                class="table-row {s.status === 'pending'
+                  ? 'bg-yellow-50/50 hover:bg-yellow-50'
+                  : ''}"
+              >
                 <td>
                   <div class="user-info">
-                    <div class="avatar-placeholder">
-                      {s.full_name
-                        ? s.full_name[0].toUpperCase()
-                        : s.name
-                          ? s.name[0].toUpperCase()
-                          : "S"}
-                    </div>
+                    {#if s.avatar && getAvatarUrl(s.avatar)}
+                      <img
+                        src={getAvatarUrl(s.avatar)}
+                        alt={s.full_name || s.name}
+                        class="w-10 h-10 object-cover rounded-full shadow-sm"
+                      />
+                    {:else}
+                      <div class="avatar-placeholder bg-slate-900">
+                        {s.full_name
+                          ? s.full_name[0].toUpperCase()
+                          : s.name
+                            ? s.name[0].toUpperCase()
+                            : "S"}
+                      </div>
+                    {/if}
                     <div class="user-details">
                       <span class="user-name"
                         >{s.full_name || s.name || "-"}</span
@@ -499,49 +527,52 @@
                 </td>
                 <td class="text-right">
                   {#if s.status === "pending"}
-                    <button
-                      class="btn-icon btn-deny flex-1"
-                      onclick={() => handleDeny(s.id, s.full_name || s.name)}
-                      title="Tolak & Hapus"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><line x1="18" y1="6" x2="6" y2="18"></line><line
-                          x1="6"
-                          y1="6"
-                          x2="18"
-                          y2="18"
-                        ></line></svg
+                    <div class="flex items-center justify-end gap-2">
+                      <button
+                        class="btn-icon btn-deny flex-1"
+                        onclick={() => handleDeny(s.id, s.full_name || s.name)}
+                        title="Tolak & Hapus"
                       >
-                      <span class="btn-label">Tolak</span>
-                    </button>
-                    <button
-                      class="btn-icon btn-approve flex-1"
-                      onclick={() => handleApprove(s.id, s.full_name || s.name)}
-                      title="Setujui Pembimbing Ini"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><polyline points="20 6 9 17 4 12"></polyline></svg
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          ><line x1="18" y1="6" x2="6" y2="18"></line><line
+                            x1="6"
+                            y1="6"
+                            x2="18"
+                            y2="18"
+                          ></line></svg
+                        >
+                        <span class="btn-label">Tolak</span>
+                      </button>
+                      <button
+                        class="btn-icon btn-approve flex-1"
+                        onclick={() =>
+                          handleApprove(s.id, s.full_name || s.name)}
+                        title="Setujui Pembimbing Ini"
                       >
-                      <span class="btn-label">Terima</span>
-                    </button>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          ><polyline points="20 6 9 17 4 12"></polyline></svg
+                        >
+                        <span class="btn-label">Terima</span>
+                      </button>
+                    </div>
                   {:else if auth.user?.role === "admin"}
                     <button
                       class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100"
@@ -592,18 +623,30 @@
       </div>
       <div class="mobile-list">
         {#each supervisors as s}
-          <div class="entry-card">
+          <div
+            class="entry-card {s.status === 'pending'
+              ? 'bg-yellow-50 border-yellow-200'
+              : ''}"
+          >
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="entry-head" onclick={() => toggleExpand(s.id)}>
               <div class="user-info">
-                <div class="avatar-placeholder">
-                  {s.full_name
-                    ? s.full_name[0].toUpperCase()
-                    : s.name
-                      ? s.name[0].toUpperCase()
-                      : "S"}
-                </div>
+                {#if s.avatar && getAvatarUrl(s.avatar)}
+                  <img
+                    src={getAvatarUrl(s.avatar)}
+                    alt={s.full_name || s.name}
+                    class="w-10 h-10 object-cover rounded-full shadow-sm"
+                  />
+                {:else}
+                  <div class="avatar-placeholder bg-slate-900">
+                    {s.full_name
+                      ? s.full_name[0].toUpperCase()
+                      : s.name
+                        ? s.name[0].toUpperCase()
+                        : "S"}
+                  </div>
+                {/if}
                 <div class="user-details">
                   <div class="user-name">{s.full_name || s.name || "-"}</div>
                   <div class="text-muted small">{s.email || "-"}</div>
@@ -622,33 +665,35 @@
 
             {#if expandedSupervisors[s.id]}
               <div class="entry-details" transition:slide={{ duration: 200 }}>
-                <div class="detail-row">
-                  <div class="detail-label">STATUS</div>
-                  <span
-                    class={`status-badge equal-badge ${s.status === "active" ? "bg-emerald-100 text-emerald-700" : s.status === "pending" ? "bg-yellow-100 text-yellow-700" : "bg-slate-100 text-slate-600"}`}
-                  >
-                    {s.status || "inactive"}
-                  </span>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">INSTITUSI</div>
-                  <div class="detail-value">{s.institution || "-"}</div>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">POSISI</div>
-                  <div class="detail-value">{s.position || "-"}</div>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">NIP</div>
-                  <div class="detail-value">{s.nip || "-"}</div>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">TELEPON</div>
-                  <div class="detail-value">{s.phone || "-"}</div>
-                </div>
-                <div class="detail-row">
-                  <div class="detail-label">JUMLAH INTERN</div>
-                  <div class="detail-value">{s.interns_count || 0}</div>
+                <div class="details-grid">
+                  <div class="detail-box col-span-2 inline-box">
+                    <div class="label">Status</div>
+                    <span
+                      class={`status-badge equal-badge ${s.status === "active" ? "bg-emerald-100 text-emerald-700" : s.status === "pending" ? "bg-yellow-100 text-yellow-700" : "bg-slate-100 text-slate-600"}`}
+                    >
+                      {s.status || "inactive"}
+                    </span>
+                  </div>
+                  <div class="detail-box">
+                    <div class="label">Institusi</div>
+                    <div class="value">{s.institution || "-"}</div>
+                  </div>
+                  <div class="detail-box">
+                    <div class="label">Posisi</div>
+                    <div class="value">{s.position || "-"}</div>
+                  </div>
+                  <div class="detail-box">
+                    <div class="label">NIP</div>
+                    <div class="value">{s.nip || "-"}</div>
+                  </div>
+                  <div class="detail-box">
+                    <div class="label">Telepon</div>
+                    <div class="value">{s.phone || "-"}</div>
+                  </div>
+                  <div class="detail-box col-span-2 inline-box">
+                    <div class="label">Jumlah Intern:</div>
+                    <div class="value">{s.interns_count || 0}</div>
+                  </div>
                 </div>
 
                 <div class="mobile-actions mt-4 pt-4 border-t border-slate-100">
@@ -1140,7 +1185,7 @@
   .btn-approve {
     display: inline-flex;
     align-items: center;
-    background-color: #10b981;
+    background-color: transparent;
     color: white;
     border: none;
     padding: 6px 10px;
@@ -1149,18 +1194,19 @@
     font-weight: 700;
     cursor: pointer;
     transition: all 0.2s;
-    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+    /* box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2); */
   }
 
   .btn-approve:hover {
-    background-color: #059669;
-    box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);
+    color: #059669;
+    /* box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3); */
+    /* transform: translateY(-1px); */
   }
 
   .btn-deny {
     display: inline-flex;
     align-items: center;
-    background-color: white;
+    background-color: transparent;
     color: #ef4444;
     border: 1px solid #ef4444;
     padding: 6px 10px;
@@ -1172,9 +1218,10 @@
   }
 
   .btn-deny:hover {
-    background-color: #ef4444;
-    color: white;
-    box-shadow: 0 4px 6px rgba(239, 68, 68, 0.3);
+    /* background-color: #ef4444; */
+    color: df3434;
+    /* box-shadow: 0 4px 6px rgba(239, 68, 68, 0.3); */
+    /* transform: translateY(-1px); */
   }
 
   /* Table Header Row */
@@ -1492,6 +1539,12 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    transition: all 0.2s;
   }
   .btn-label {
     display: none;
@@ -1573,12 +1626,12 @@
     .mobile-list {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      /* gap: 12px; */
     }
     .entry-card {
       padding: 14px;
-      border-radius: 16px;
-      border: 1px solid #e2e8f0;
+      /* border-radius: 16px; */
+      border-top: 1px solid #e2e8f0;
       background: #ffffff;
       box-shadow: 0 6px 20px -18px rgba(15, 23, 42, 0.3);
     }
@@ -1739,5 +1792,49 @@
   .btn-icon:hover {
     background: #e2e8f0;
     color: #0f172a;
+  }
+
+  /* Mobile Grid Styles */
+  @media (max-width: 900px) {
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .detail-box {
+      padding: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #f8fafc;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .detail-box.col-span-2 {
+      grid-column: span 2 / span 2;
+    }
+    .detail-box.inline-box {
+      flex-direction: row;
+      gap: 8px;
+    }
+    .detail-box.inline-box .label {
+      margin: 0;
+    }
+    .detail-box .label {
+      margin: 0 0 6px 0;
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .detail-box .value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+    }
   }
 </style>

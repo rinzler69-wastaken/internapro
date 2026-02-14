@@ -3,6 +3,7 @@
   import Chart from "chart.js/auto";
   import { api } from "../lib/api.js";
   import { auth } from "../lib/auth.svelte.js";
+  import { getAvatarUrl } from "../lib/utils.js";
   import TaskCreateModal from "./TaskCreateModal.svelte";
   import AssessmentCreateModal from "./AssessmentCreateModal.svelte";
 
@@ -149,7 +150,7 @@
           results[3].value ||
           [];
     } catch (err) {
-      console.warn("Partial profile metrics failed:", err);
+      // console.warn("Partial profile metrics failed:", err); // Cleaned up debug log
     }
 
     deriveStats({ tasks, attendance, assessments, dashboard: dashboardData });
@@ -339,14 +340,18 @@
     }
 
     if (assessmentData && radarChartEl) {
+      // COPY data to avoid Svelte proxy issues with Chart.js
+      const labels = [...assessmentData.labels];
+      const dataValues = [...assessmentData.values];
+
       radarChart = new Chart(radarChartEl, {
         type: "radar",
         data: {
-          labels: assessmentData.labels,
+          labels: labels,
           datasets: [
             {
               label: "Skor Rata-rata",
-              data: assessmentData.values,
+              data: dataValues,
               backgroundColor: "rgba(99, 102, 241, 0.2)",
               borderColor: "rgba(99, 102, 241, 1)",
               borderWidth: 2,
@@ -424,16 +429,6 @@
     if (status === "cancelled")
       return { text: "Dibatalkan", cls: "badge-danger" };
     return { text: status || "-", cls: "badge-muted" };
-  }
-
-  function avatarUrl(path) {
-    if (!path) return null;
-    if (path.startsWith("http")) return path;
-    const base = path.startsWith("/uploads/") ? path : `/uploads/${path}`;
-    const qs = [];
-    if (auth.token) qs.push(`token=${auth.token}`);
-    qs.push(`t=${Date.now()}`);
-    return `${base}${base.includes("?") ? "&" : "?"}${qs.join("&")}`;
   }
 
   const isSupervisor = $derived(
@@ -593,17 +588,17 @@
         <button class="btn primary" onclick={load}>Coba Lagi</button>
       </div>
     {:else}
-      <div class="card hero">
+      <div class="card hero animate-slide-up">
         <div class="hero-left">
           <div class="avatar">
-            {#if avatarUrl(user?.avatar)}
+            {#if getAvatarUrl(user?.avatar)}
               <img
-                src={avatarUrl(user?.avatar)}
+                src={getAvatarUrl(user?.avatar)}
                 alt="avatar"
                 referrerpolicy="no-referrer"
               />
             {:else}
-              <div class="avatar-placeholder">
+              <div class="avatar-placeholder bg-slate-900">
                 {user?.name?.[0]?.toUpperCase() || "U"}
               </div>
             {/if}
@@ -635,14 +630,14 @@
             onclick={handleDownloadReport}
           >
             <span class="material-symbols-outlined">description</span>
-            Download Report
+            Unduh Report
           </button>
         </div>
       </div>
 
       {#if intern}
         <!-- Stats -->
-        <div class="grid stats">
+        <div class="grid stats animate-slide-up" style="animation-delay: 0.1s;">
           <div class="stat-card indigo">
             <div class="stat-label">Tugas Selesai</div>
             <div class="stat-value">
@@ -679,7 +674,10 @@
         </div>
 
         <!-- AKSI CEPAT -->
-        <div class="card quick-actions-card">
+        <div
+          class="card quick-actions-card animate-slide-up"
+          style="animation-delay: 0.15s;"
+        >
           <div class="card-head">
             <div class="flex items-center gap-2">
               <span class="material-symbols-outlined text-indigo-500">bolt</span
@@ -714,7 +712,10 @@
         </div>
 
         <!-- Charts -->
-        <div class="grid charts">
+        <div
+          class="grid charts animate-slide-up"
+          style="animation-delay: 0.2s;"
+        >
           <div class="card chart-card">
             <div class="card-head">
               <h3>Status Pekerjaan</h3>
@@ -733,24 +734,48 @@
               <canvas bind:this={attendanceChartEl}></canvas>
             </div>
           </div>
-        </div>
-
-        {#if assessmentData}
-          <div class="card chart-card radar">
+          <!-- Radar Chart -->
+          <div
+            class="card chart-card radar animate-slide-up"
+            style="animation-delay: 0.3s;"
+          >
             <div class="card-head">
-              <h3>Radar Penilaian (5 terbaru)</h3>
-              <span class="badge indigo">Radar</span>
+              <h3>Radar Penilaian</h3>
+              <!-- <span class="badge indigo">Radar</span> -->
             </div>
             <div class="chart-wrap tall">
-              <canvas bind:this={radarChartEl}></canvas>
+              {#if assessmentData}
+                <canvas bind:this={radarChartEl}></canvas>
+              {:else}
+                <div class="empty-chart">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="48"
+                    height="48"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#cbd5e1"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    ><path d="M3 3v18h18"></path><path
+                      d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"
+                    ></path></svg
+                  >
+                  <p>Belum ada data penilaian</p>
+                </div>
+              {/if}
             </div>
           </div>
-        {/if}
+        </div>
       {/if}
 
       {#if intern || isSupervisor}
         <!-- Details -->
-        <div class="grid details">
+        <div
+          class="grid details animate-slide-up"
+          style="animation-delay: 0.4s;"
+        >
           <div class="card">
             <div class="card-head">
               <h3>Informasi Pribadi</h3>
@@ -964,12 +989,6 @@
     gap: 16px;
   }
 
-  .hero-right .btn {
-    grid-column: 1 / -1; /* span full width */
-    /* center horizontally */
-    align-self: center; /* center vertically */
-  }
-
   .avatar {
     width: 78px;
     height: 78px;
@@ -1016,13 +1035,6 @@
       flex-direction: column;
       align-items: center;
       gap: 8px;
-    }
-  }
-
-  @media (max-width: 900px) {
-    .hero-right .btn {
-      width: 100%;
-      justify-content: center;
     }
   }
 
@@ -1308,6 +1320,7 @@
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     }
   }
+
   .btn-report {
     display: flex;
     align-items: center;
@@ -1315,8 +1328,8 @@
     background: #4f46e5;
     color: white !important;
     border: none !important;
-    padding: 10px 16px;
-    border-radius: 10px;
+    padding: 8px 16px;
+    border-radius: 999px;
     font-weight: 600;
     transition: all 0.2s;
   }
@@ -1401,5 +1414,22 @@
   }
   .btn-back:hover {
     color: #0f172a;
+  }
+
+  /* Slide Up Animation */
+  .animate-slide-up {
+    opacity: 0;
+    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 </style>

@@ -138,7 +138,7 @@ func (h *ReportHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT r.id, r.intern_id, r.created_by, r.title, r.content, r.type,
 		       r.period_start, r.period_end, r.status, r.feedback, r.created_at, r.updated_at,
-		       iu.name, cu.name
+		       iu.name, cu.name, iu.avatar, cu.avatar
 	` + baseFrom + " " + whereClause + " ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
 
 	args = append(args, limit, offset)
@@ -153,11 +153,11 @@ func (h *ReportHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var rep models.Report
 		var feedback sql.NullString
-		var internName, createdByName sql.NullString
+		var internName, createdByName, internAvatar, createdByAvatar sql.NullString
 		if err := rows.Scan(
 			&rep.ID, &rep.InternID, &rep.CreatedBy, &rep.Title, &rep.Content, &rep.Type,
 			&rep.PeriodStart, &rep.PeriodEnd, &rep.Status, &feedback, &rep.CreatedAt, &rep.UpdatedAt,
-			&internName, &createdByName,
+			&internName, &createdByName, &internAvatar, &createdByAvatar,
 		); err == nil {
 			if feedback.Valid {
 				rep.Feedback = feedback.String
@@ -167,6 +167,12 @@ func (h *ReportHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			}
 			if createdByName.Valid {
 				rep.CreatedByName = createdByName.String
+			}
+			if internAvatar.Valid {
+				rep.InternAvatar = internAvatar.String
+			}
+			if createdByAvatar.Valid {
+				rep.CreatedByAvatar = createdByAvatar.String
 			}
 			reports = append(reports, rep)
 		}
@@ -188,7 +194,7 @@ func (h *ReportHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT r.id, r.intern_id, r.created_by, r.title, r.content, r.type,
 		       r.period_start, r.period_end, r.status, r.feedback, r.created_at, r.updated_at,
-		       iu.name, cu.name
+		       iu.name, cu.name, iu.avatar, cu.avatar
 		FROM reports r
 		LEFT JOIN interns i ON r.intern_id = i.id
 		LEFT JOIN users iu ON i.user_id = iu.id
@@ -198,11 +204,11 @@ func (h *ReportHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	var rep models.Report
 	var feedback sql.NullString
-	var internName, createdByName sql.NullString
+	var internName, createdByName, internAvatar, createdByAvatar sql.NullString
 	err := h.db.QueryRow(query, id).Scan(
 		&rep.ID, &rep.InternID, &rep.CreatedBy, &rep.Title, &rep.Content, &rep.Type,
 		&rep.PeriodStart, &rep.PeriodEnd, &rep.Status, &feedback, &rep.CreatedAt, &rep.UpdatedAt,
-		&internName, &createdByName,
+		&internName, &createdByName, &internAvatar, &createdByAvatar,
 	)
 	if err == sql.ErrNoRows {
 		utils.RespondNotFound(w, "Report not found")
@@ -229,6 +235,12 @@ func (h *ReportHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if createdByName.Valid {
 		rep.CreatedByName = createdByName.String
+	}
+	if internAvatar.Valid {
+		rep.InternAvatar = internAvatar.String
+	}
+	if createdByAvatar.Valid {
+		rep.CreatedByAvatar = createdByAvatar.String
 	}
 
 	utils.RespondSuccess(w, "Report retrieved", rep)

@@ -1,29 +1,50 @@
 <script>
   import { onMount } from "svelte";
-  import { goto, route } from "@mateothegreat/svelte5-router";
+  import { goto } from "@mateothegreat/svelte5-router";
+  import { slide } from "svelte/transition";
   import { api } from "../lib/api.js";
+  import { portal } from "../lib/portal.js";
   import { auth } from "../lib/auth.svelte.js";
+  import { getAvatarUrl } from "../lib/utils.js";
 
   import TaskCreateModal from "./TaskCreateModal.svelte";
   import TaskEditModal from "./TaskEditModal.svelte";
 
   // State
   let tasks = $state([]);
-  let pagination = $state({ page: 1, total_pages: 1 });
-  let search = $state("");
-  let status = $state("");
-  let priority = $state("");
-  let internId = $state("");
-  let interns = $state([]);
-  let loading = $state(true);
-  let exporting = $state(false);
-  let isModalOpen = $state(false);
+  let loading = $state(false);
+  let isCreateModalOpen = $state(false);
   let isEditModalOpen = $state(false);
   let editingTaskId = $state(null);
+  let searchQuery = $state("");
+  let filterStatus = $state("");
+  let filterPriority = $state("");
+  let filterInternId = $state("");
+  let currentPage = $state(1);
+  let totalPages = $state(1);
+  let totalItems = $state(0);
+  let searchTimeout;
+  let expandedTasks = $state({});
+  let interns = $state([]);
+  let exporting = $state(false);
+
+  // Keep overlay-root click-through state in sync with our modals
+  $effect(() => {
+    const root =
+      typeof document !== "undefined"
+        ? document.querySelector("#overlay-root")
+        : null;
+    if (!(root instanceof HTMLElement)) return;
+    const hasModal = isCreateModalOpen || isEditModalOpen;
+    root.style.pointerEvents = hasModal ? "auto" : "none";
+    if (!hasModal) {
+      root.dataset.portalCount = "0";
+    }
+  });
 
   const statusLabels = {
     pending: "Pending",
-    scheduled: "Terjadwal",
+    // scheduled: "Terjadwal",
     in_progress: "Dalam Proses",
     submitted: "Menunggu Review",
     revision: "Revisi",
@@ -43,32 +64,6 @@
 
   function formatSubmitted(task) {
     return formatDate(task?.submitted_at || task?.completed_at);
-  }
-
-  function getPriorityColor(p) {
-    switch (p) {
-      case "high":
-        return "tone-rose"; // red
-      case "medium":
-        return "tone-amber"; // yellow
-      default:
-        return "tone-emerald"; // green
-    }
-  }
-
-  function rowTint(status) {
-    switch (status) {
-      case "completed":
-        return "bg-emerald-50";
-      case "in_progress":
-        return "bg-amber-50";
-      case "revision":
-        return "bg-rose-50";
-      case "submitted":
-        return "bg-blue-50";
-      default:
-        return "";
-    }
   }
 
   const statusBadge = (status) => {
@@ -93,11 +88,11 @@
           text: "Revisi",
           cls: "bg-rose-100 text-rose-700 border-rose-200",
         };
-      case "scheduled":
-        return {
-          text: "Terjadwal",
-          cls: "bg-indigo-100 text-indigo-700 border-indigo-200",
-        };
+      // case "scheduled":
+      //   return {
+      //     text: "Terjadwal",
+      //     cls: "bg-indigo-100 text-indigo-700 border-indigo-200",
+      //   };
       default:
         return {
           text: statusLabels[status] || status || "Pending",
@@ -106,36 +101,51 @@
     }
   };
 
-  // Helper function to get status color class for pills
-  function getStatusColor(s) {
-    switch (s) {
-      case "completed":
-        return "tone-emerald";
-      case "submitted":
-        return "tone-blue";
-      case "in_progress":
-        return "tone-amber";
-      case "revision":
-        return "tone-rose";
+  function getPriorityBadge(priority) {
+    switch (priority) {
+      case "high":
+        return {
+          text: "High",
+          cls: "bg-rose-100 text-rose-700 border-rose-200",
+        };
+      case "medium":
+        return {
+          text: "Medium",
+          cls: "bg-amber-100 text-amber-700 border-amber-200",
+        };
+      case "low":
+        return {
+          text: "Low",
+          cls: "bg-emerald-100 text-emerald-700 border-emerald-200",
+        };
       default:
-        return "tone-slate";
+        return {
+          text: priority || "-",
+          cls: "bg-slate-100 text-slate-600 border-slate-200",
+        };
     }
   }
 
+  // --- Fetch Data ---
   async function fetchTasks() {
     loading = true;
     try {
-      const params = { page: pagination.page || 1, limit: 15 };
-      if (search) params.search = search;
-      if (status) params.status = status;
-      if (priority) params.priority = priority;
-      if (internId) params.intern_id = internId;
+      const params = { page: currentPage, limit: 50 };
+      if (searchQuery) params.search = searchQuery;
+      if (filterStatus) params.status = filterStatus;
+      if (filterPriority) params.priority = filterPriority;
+      if (filterInternId) params.intern_id = filterInternId;
 
       const res = await api.getTasks(params);
       tasks = res.data || [];
-      pagination = res.pagination || { page: 1, total_pages: 1 };
+      const pagination = res.pagination || {};
+      totalPages = Math.max(pagination.total_pages || 1, 1);
+      totalItems = pagination.total_items || 0;
+      currentPage = pagination.page || currentPage;
+      console.log("Fetched tasks:", tasks);
     } catch (err) {
-      console.error(err);
+      console.error("Failed to fetch tasks:", err);
+      alert("Gagal memuat data tugas: " + err.message);
     } finally {
       loading = false;
     }
@@ -151,12 +161,31 @@
     }
   }
 
+  function goToPreviousPage() {
+    currentPage = Math.max(1, currentPage - 1);
+    fetchTasks();
+  }
+
+  function goToNextPage() {
+    if (currentPage >= totalPages) return;
+    currentPage += 1;
+    fetchTasks();
+  }
+
+  function handleSearchInput() {
+    clearTimeout(searchTimeout);
+    currentPage = 1;
+    searchTimeout = setTimeout(() => {
+      fetchTasks();
+    }, 500);
+  }
+
   async function exportTasks() {
     exporting = true;
     try {
       const params = new URLSearchParams();
-      if (status) params.append("status", status);
-      if (internId) params.append("intern_id", internId);
+      if (filterStatus) params.append("status", filterStatus);
+      if (filterInternId) params.append("intern_id", filterInternId);
       const res = await fetch(
         `/api/export/tasks${params.toString() ? `?${params.toString()}` : ""}`,
         {
@@ -190,186 +219,248 @@
     }
   }
 
-  function setPage(p) {
-    if (!pagination.total_pages) return;
-    const target = Math.min(Math.max(1, p), pagination.total_pages);
-    if (target !== pagination.page) {
-      pagination = { ...pagination, page: target };
-      fetchTasks();
-    }
+  function toggleExpand(id) {
+    expandedTasks[id] = !expandedTasks[id];
   }
 
-  onMount(() => {
-    fetchTasks();
-    fetchInterns();
+  onMount(async () => {
+    await fetchTasks();
+    await fetchInterns();
   });
+
+  function getInternAvatar(task) {
+    if (task.intern_avatar) return task.intern_avatar;
+    const intern = interns.find((i) => i.id === task.intern_id);
+    return intern?.avatar;
+  }
 </script>
 
-<div class="page-shell">
-  <div class="page-header">
-    <div class="page-title">
-      <h1>Daftar Penugasan</h1>
-      <!-- <p class="muted">
-        pantau, review, dan kelola tugas magang dengan ringkas.
-      </p> -->
-    </div>
-    {#if auth.user?.role !== "intern"}
-      <div class="page-actions">
-        <button class="ghost" onclick={exportTasks} disabled={exporting}>
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            ><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"
-            ></path><polyline points="7 11 12 16 17 11"></polyline><line
-              x1="12"
-              y1="4"
-              x2="12"
-              y2="16"
-            ></line></svg
-          >
-          {exporting ? "Menyiapkan..." : "Export"}
-        </button>
-        <button class="primary" onclick={() => (isModalOpen = true)}>
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            ><line x1="12" y1="5" x2="12" y2="19"></line><line
-              x1="5"
-              y1="12"
-              x2="19"
-              y2="12"
-            ></line></svg
-          >
-          Buat Tugas
-        </button>
-      </div>
-    {/if}
+<div class="page-container animate-fade-in">
+  <div class="flex items-center gap-3 pb-8">
+    <h4 class="card-title">Daftar Penugasan</h4>
+    <span class="badge-count">{tasks.length} dari {totalItems} Tugas</span>
   </div>
 
-  <section class="card mb-6">
-    <div class="card-body">
-      <div class="filters">
-        <div class="field stretch">
-          <label for="searchTasks">Cari</label>
-          <div class="input-icon">
+  <!-- BAGIAN TABEL DAFTAR -->
+  <div class="card table-card animate-slide-up" style="animation-delay: 0.1s;">
+    <div class="card-header-row border-b">
+      <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
+        {#if auth.user?.role !== "intern"}
+          <button
+            class="cursor-pointer flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm flex items-center justify-center gap-2"
+            onclick={() => (isCreateModalOpen = true)}
+          >
             <svg
-              class="search-icon"
-              width="18"
-              height="18"
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><line x1="12" y1="5" x2="12" y2="19"></line><line
+                x1="5"
+                y1="12"
+                x2="19"
+                y2="12"
+              ></line></svg
             >
-              <circle cx="11" cy="11" r="8" /><line
-                x1="21"
-                y1="21"
-                x2="16.65"
-                y2="16.65"
-              />
-            </svg>
-            <input
-              id="searchTasks"
-              placeholder="Judul tugas..."
-              bind:value={search}
-              onkeydown={(e) => e.key === "Enter" && fetchTasks()}
-            />
-          </div>
-        </div>
-        <div class="field">
-          <label for="statusFilter">Status</label>
-          <select id="statusFilter" bind:value={status}>
-            <option value="">Semua</option>
-            <option value="pending">Pending</option>
-            <option value="in_progress">Dalam Proses</option>
-            <option value="submitted">Menunggu Review</option>
-            <option value="revision">Revisi</option>
-            <option value="completed">Selesai</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="priorityFilter">Prioritas</label>
-          <select id="priorityFilter" bind:value={priority}>
-            <option value="">Semua</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-        {#if auth.user?.role !== "intern"}
-          <div class="field">
-            <label for="internFilter">Intern</label>
-            <select id="internFilter" bind:value={internId}>
-              <option value="">Semua</option>
-              {#each interns as intern}
-                <option value={intern.id}
-                  >{intern.full_name || intern.name}</option
-                >
-              {/each}
-            </select>
-          </div>
+            <span>Buat Tugas</span>
+          </button>
+          <button
+            class="cursor-pointer flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+            onclick={exportTasks}
+            disabled={exporting}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"
+              ></path><polyline points="7 11 12 16 17 11"></polyline><line
+                x1="12"
+                y1="4"
+                x2="12"
+                y2="16"
+              ></line></svg
+            >
+            <span>{exporting ? "Menyiapkan..." : "Export"}</span>
+          </button>
         {/if}
-        <div class="field actions">
-          <button
-            class="circle-btn primary-circle"
-            onclick={fetchTasks}
-            title="Terapkan Filter"
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          onclick={fetchTasks}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path
+              d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"
+            /></svg
           >
-            <span class="material-symbols-outlined">filter_alt</span>
-            <span class="btn-text-mobile">Terapkan</span>
-          </button>
-          <button
-            class="circle-btn ghost-circle"
-            title="Reset Filter"
-            onclick={() => {
-              search = "";
-              status = "";
-              priority = "";
-              internId = "";
-              fetchTasks();
-            }}
+          <span>Refresh</span>
+        </button>
+      </div>
+      <div
+        class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2 {totalPages <=
+        1
+          ? 'opacity-50 pointer-events-none'
+          : ''}"
+      >
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {currentPage <=
+          1
+            ? 'opacity-50 cursor-not-allowed'
+            : 'cursor-pointer'}"
+          onclick={goToPreviousPage}
+          disabled={currentPage <= 1}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><path d="M15 18l-6-6 6-6" /></svg
           >
-            <span class="material-symbols-outlined">restart_alt</span>
-            <span class="btn-text-mobile">Reset</span>
-          </button>
+          <span>Prev</span>
+        </button>
+
+        <div
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 pagination-pill"
+        >
+          <span>{currentPage}</span>
+          <span class="text-slate-500">of</span>
+          <span>{totalPages}</span>
         </div>
+
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {currentPage >=
+          totalPages
+            ? 'opacity-50 cursor-not-allowed'
+            : 'cursor-pointer'}"
+          onclick={goToNextPage}
+          disabled={currentPage >= totalPages}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg
+          >
+          <span>Next</span>
+        </button>
       </div>
     </div>
-  </section>
 
-  <div class="card list-card animate-slide-up" style="animation-delay: 0.1s;">
-    <div
-      class="card-header border-b"
-      style="padding: 4px 0px; justify-content: flex-start; gap: 12px; margin-bottom: 0;"
-    >
-      <h3>Daftar Tugas</h3>
-      <span class="badge-count">{tasks.length} Item</span>
+    <div class="toolbar">
+      <div class="search-wrapper">
+        <span class="material-symbols-outlined search-icon">search</span>
+        <input
+          type="text"
+          bind:value={searchQuery}
+          oninput={handleSearchInput}
+          onkeydown={(e) =>
+            e.key === "Enter" && (clearTimeout(searchTimeout), fetchTasks())}
+          placeholder="Cari Judul Tugas..."
+          class="search-input"
+        />
+      </div>
+
+      <select
+        bind:value={filterStatus}
+        onchange={fetchTasks}
+        class="filter-select"
+      >
+        <option value="">Semua Status</option>
+        <option value="pending">Pending</option>
+        <!-- <option value="scheduled">Terjadwal</option> -->
+        <option value="in_progress">Dalam Proses</option>
+        <option value="submitted">Menunggu Review</option>
+        <option value="revision">Revisi</option>
+        <option value="completed">Selesai</option>
+      </select>
+
+      <select
+        bind:value={filterPriority}
+        onchange={fetchTasks}
+        class="filter-select"
+      >
+        <option value="">Semua Prioritas</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
+
+      {#if auth.user?.role !== "intern"}
+        <select
+          bind:value={filterInternId}
+          onchange={fetchTasks}
+          class="filter-select"
+        >
+          <option value="">Semua Intern</option>
+          {#each interns as intern}
+            <option value={intern.id}>{intern.full_name || intern.name}</option>
+          {/each}
+        </select>
+      {/if}
     </div>
 
     {#if loading}
       <div class="loading-state">
         <div class="spinner"></div>
-        <p>Memuat daftar tugas...</p>
+        <p>Memuat data...</p>
       </div>
     {:else if tasks.length === 0}
       <div class="empty-state">
-        <div class="empty">📋</div>
-        <p>Tidak ada tugas ditemukan.</p>
-        {#if auth.user?.role !== "intern"}
-          <p class="muted">Coba ubah filter atau buat tugas baru.</p>
-        {/if}
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#e5e7eb"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          ><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+          ></path><polyline points="14 2 14 8 20 8"></polyline><line
+            x1="16"
+            y1="13"
+            x2="8"
+            y2="13"
+          ></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline
+            points="10 9 9 9 8 9"
+          ></polyline></svg
+        >
+        <p>Belum ada data tugas.</p>
       </div>
     {:else}
-      <div class="table-container desktop-only">
-        <table class="table desktop-table">
+      <div class="table-responsive desktop-only">
+        <table class="table">
           <thead>
             <tr>
               <th>Judul</th>
@@ -378,68 +469,109 @@
               <th>Prioritas</th>
               <th>Deadline</th>
               <th>Dikumpulkan</th>
-              <th>Aksi</th>
+              <th class="text-right">Aksi</th>
             </tr>
           </thead>
           <tbody>
             {#each tasks as task}
               {@const badge = statusBadge(task.status)}
-              <tr
-                class={`hover-row ${rowTint(task.status)}`}
-                onclick={() => goto(`/tasks/${task.id}`)}
-              >
-                <td class="font-medium">
-                  <div class="flex flex-col gap-1">
-                    <span class="font-bold text-slate-800">{task.title}</span>
-                    <span class="text-xs text-slate-500 truncate max-w-[200px]"
-                      >{task.description || "—"}</span
-                    >
+              {@const priorityBadge = getPriorityBadge(task.priority)}
+              <tr class="table-row">
+                <td>
+                  <div class="task-info">
+                    <div class="task-icon-wrapper">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <path
+                          d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                        ></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                      </svg>
+                    </div>
+                    <div class="task-details">
+                      <span class="task-name">{task.title}</span>
+                      {#if task.description}
+                        <span class="task-desc">{task.description}</span>
+                      {/if}
+                    </div>
                   </div>
                 </td>
                 {#if auth.user?.role !== "intern"}
                   <td>
                     <div class="user-info">
-                      <div class="avatar-mini">
-                        {task.intern_name?.charAt(0) || "U"}
-                      </div>
+                      {#if getInternAvatar(task) && getAvatarUrl(getInternAvatar(task))}
+                        <img
+                          src={getAvatarUrl(getInternAvatar(task))}
+                          alt={task.intern_name}
+                          class="w-8 h-8 object-cover rounded-full shadow-sm"
+                        />
+                      {:else}
+                        <div class="avatar-placeholder">
+                          {task.intern_name?.charAt(0) || "U"}
+                        </div>
+                      {/if}
                       <span>{task.intern_name || "-"}</span>
                     </div>
                   </td>
                 {/if}
-                <td>
-                  <span class={`status-badge equal-badge ${badge.cls}`}>
+                <td class="text-center">
+                  <span
+                    class={`status-badge status-${task.status || "pending"} ${badge.cls}`}
+                  >
                     {badge.text}
                   </span>
                   {#if task.is_late && task.status !== "completed"}
-                    <span class="chip danger ml-2">Lewat</span>
+                    <span class="chip-late">Lewat</span>
                   {/if}
                 </td>
-                <td>
-                  <span
-                    class={`pill priority ${getPriorityColor(task.priority)}`}
-                  >
-                    <span class="dot"></span>
-                    {task.priority === "medium"
-                      ? "Medium"
-                      : task.priority || "-"}
+                <td class="text-center">
+                  <span class={`status-badge ${priorityBadge.cls}`}>
+                    {priorityBadge.text}
                   </span>
                 </td>
                 <td
-                  class={`mono ${task.is_late && task.deadline ? "late" : ""}`}
+                  class={`text-muted mono ${task.is_late && task.deadline ? "late" : ""}`}
                 >
                   {formatDate(task.deadline)}
                 </td>
-                <td class="mono">{formatSubmitted(task)}</td>
-                <td class="action-cell">
+                <td class="text-muted mono">{formatSubmitted(task)}</td>
+                <td class="text-right">
+                  <button
+                    class="btn-icon text-sky-600 hover:text-sky-700 bg-sky-50 hover:bg-sky-100"
+                    onclick={() => goto(`/tasks/${task.id}`)}
+                    title="Lihat Detail"
+                  >
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"
+                      ></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                  </button>
                   {#if auth.user?.role !== "intern"}
                     <button
-                      class="btn-icon text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100"
+                      class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100"
                       onclick={(e) => {
                         e.stopPropagation();
                         editingTaskId = task.id;
                         isEditModalOpen = true;
                       }}
-                      title="Edit Tugas"
+                      title="Edit Data"
                     >
                       <svg
                         width="18"
@@ -458,12 +590,9 @@
                       </svg>
                     </button>
                     <button
-                      class="btn-icon text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100"
-                      onclick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(task.id, task.title);
-                      }}
-                      title="Hapus Tugas"
+                      class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100"
+                      onclick={() => handleDelete(task.id, task.title)}
+                      title="Hapus"
                     >
                       <svg
                         width="18"
@@ -480,143 +609,159 @@
                       </svg>
                     </button>
                   {/if}
-                  <button
-                    class="btn-icon text-sky-600 hover:text-sky-700 bg-sky-50 hover:bg-sky-100"
-                    title="Lihat"
-                  >
-                    <svg
-                      width="18"
-                      height="18"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"
-                      ></path>
-                      <circle cx="12" cy="12" r="3"></circle>
-                    </svg>
-                  </button>
                 </td>
               </tr>
             {/each}
           </tbody>
         </table>
       </div>
-
       <div class="mobile-list">
         {#each tasks as task}
           {@const badge = statusBadge(task.status)}
-          <div
-            class={`entry-card ${rowTint(task.status)}`}
-            role="button"
-            tabindex="0"
-            onclick={() => goto(`/tasks/${task.id}`)}
-            onkeydown={(e) => e.key === "Enter" && goto(`/tasks/${task.id}`)}
-          >
-            <div class="entry-head">
-              <div class="title-row">
-                <span class="material-symbols-outlined task-icon"
-                  >assignment</span
-                >
-                <span class="task-title">{task.title}</span>
+          {@const priorityBadge = getPriorityBadge(task.priority)}
+          <div class="entry-card">
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="entry-head" onclick={() => toggleExpand(task.id)}>
+              <div class="task-info">
+                <div class="task-icon-wrapper">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                    ></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                  </svg>
+                </div>
+                <div class="task-details">
+                  <div class="task-name">{task.title}</div>
+                  {#if task.description}
+                    <div class="text-muted small truncate">
+                      {task.description}
+                    </div>
+                  {/if}
+                </div>
               </div>
-              <span class={`status-badge equal-badge ${badge.cls}`}
-                >{badge.text}</span
-              >
+              <button class="expand-btn">
+                <span
+                  class="material-symbols-outlined transition-transform duration-200 {expandedTasks[
+                    task.id
+                  ]
+                    ? 'rotate-180'
+                    : ''}">expand_more</span
+                >
+              </button>
             </div>
 
-            {#if auth.user?.role !== "intern"}
-              <div class="intern-grid">
-                <div class="intern-box">
-                  <div class="avatar-mini">
-                    {task.intern_name?.charAt(0) || "U"}
+            {#if expandedTasks[task.id]}
+              <div class="entry-details" transition:slide={{ duration: 200 }}>
+                {#if auth.user?.role !== "intern"}
+                  <div class="intern-grid">
+                    <div class="intern-box">
+                      {#if getInternAvatar(task) && getAvatarUrl(getInternAvatar(task))}
+                        <img
+                          src={getAvatarUrl(getInternAvatar(task))}
+                          alt={task.intern_name}
+                          class="w-7 h-7 object-cover rounded-full border border-slate-200"
+                        />
+                      {:else}
+                        <div class="avatar-mini">
+                          {task.intern_name?.charAt(0) || "U"}
+                        </div>
+                      {/if}
+                      <span class="intern-box-label"
+                        >{task.intern_name || "-"}</span
+                      >
+                    </div>
                   </div>
-                  <span class="intern-box-label">{task.intern_name || "-"}</span
+                {/if}
+
+                <div class="details-grid">
+                  <div class="detail-box">
+                    <div class="label">Status</div>
+                    <span class={`status-badge equal-badge ${badge.cls}`}>
+                      {badge.text}
+                    </span>
+                  </div>
+                  <div class="detail-box">
+                    <div class="label">Prioritas</div>
+                    <span
+                      class={`status-badge equal-badge ${priorityBadge.cls}`}
+                    >
+                      {priorityBadge.text}
+                    </span>
+                  </div>
+                  <div class="detail-box">
+                    <div class="label">Deadline</div>
+                    <div
+                      class={`value mono ${task.is_late && task.deadline ? "late" : ""}`}
+                    >
+                      {formatDate(task.deadline)}
+                    </div>
+                  </div>
+                  <div class="detail-box">
+                    <div class="label">Dikumpulkan</div>
+                    <div class="value mono">{formatSubmitted(task)}</div>
+                  </div>
+                </div>
+
+                <div class="mobile-actions mt-4 pt-4 border-t border-slate-100">
+                  <button
+                    class="mini-btn mobile"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      goto(`/tasks/${task.id}`);
+                    }}
                   >
+                    <span class="material-symbols-outlined">visibility</span>
+                    <span class="btn-text">Detail</span>
+                  </button>
+                  {#if auth.user?.role !== "intern"}
+                    <button
+                      class="mini-btn-circle mobile"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        editingTaskId = task.id;
+                        isEditModalOpen = true;
+                      }}
+                    >
+                      <span class="material-symbols-outlined">edit</span>
+                    </button>
+                    <button
+                      class="mini-btn mobile danger"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(task.id, task.title);
+                      }}
+                    >
+                      <span class="material-symbols-outlined">delete</span>
+                      <span class="btn-text">Hapus</span>
+                    </button>
+                  {/if}
                 </div>
               </div>
             {/if}
-
-            <div class="info-grid mt-3">
-              <div class="info-box">
-                <p class="label">Priority</p>
-                <span
-                  class={`pill priority small ${getPriorityColor(task.priority)}`}
-                >
-                  <span class="dot"></span>{task.priority}
-                </span>
-              </div>
-              <div class="info-box">
-                <p class="label">Deadline</p>
-                <p
-                  class={`value ${task.is_late ? "text-red-600 font-bold" : ""}`}
-                >
-                  {formatDate(task.deadline)}
-                </p>
-              </div>
-            </div>
-
-            <div class="mobile-actions mt-3">
-              {#if auth.user?.role !== "intern"}
-                <button
-                  class="mini-btn mobile"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    editingTaskId = task.id;
-                    isEditModalOpen = true;
-                  }}
-                >
-                  <span class="material-symbols-outlined">edit</span>
-                  <span class="btn-text">Edit</span>
-                </button>
-                <button
-                  class="mini-btn mobile danger"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(task.id, task.title);
-                  }}
-                >
-                  <span class="material-symbols-outlined">delete</span>
-                  <span class="btn-text">Hapus</span>
-                </button>
-              {/if}
-              <button class="mini-btn mobile">
-                <span class="material-symbols-outlined">visibility</span>
-                <span class="btn-text">Detail</span>
-              </button>
-            </div>
           </div>
         {/each}
       </div>
     {/if}
   </div>
-
-  {#if pagination.total_pages > 1}
-    <div class="pager">
-      <button
-        class="ghost"
-        onclick={() => setPage((pagination.page || 1) - 1)}
-        disabled={(pagination.page || 1) <= 1}>‹ Prev</button
-      >
-      <span class="muted"
-        >Halaman {pagination.page || 1} dari {pagination.total_pages}</span
-      >
-      <button
-        class="ghost"
-        onclick={() => setPage((pagination.page || 1) + 1)}
-        disabled={(pagination.page || 1) >= pagination.total_pages}
-        >Next ›</button
-      >
-    </div>
-  {/if}
 </div>
 
 <TaskCreateModal
-  isOpen={isModalOpen}
-  onClose={() => (isModalOpen = false)}
+  isOpen={isCreateModalOpen}
+  onClose={() => (isCreateModalOpen = false)}
   onSuccess={() => {
-    isModalOpen = false;
+    isCreateModalOpen = false;
     fetchTasks();
   }}
 />
@@ -636,327 +781,155 @@
 />
 
 <style>
-  /* html, */
-  body {
-    width: 100%;
-    max-width: 100%;
-    overflow-x: clip;
-  }
+  /* Base Layout */
 
-  body {
-    overscroll-behavior-x: none;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  * {
-    max-width: 100%;
-  }
-
-  :global(body) {
-    font-family: "Geist", "Inter", sans-serif;
-    color: #0f172a;
-    background: #f8fafc;
-    overflow-x: hidden; /* Safety */
-  }
-
-  /* Match Attendance container style */
-  .page-shell {
-    margin: 0 auto;
-    /* padding: 1rem;  */
-    width: 100%;
+  .page-container {
+    animation: fadeIn 0.5s ease-out;
     max-width: 1200px;
-    overflow-x: clip;
-    position: relative;
+    margin: 0 auto;
+    width: 100%;
+    padding: 0 16px;
   }
 
-  @media (min-width: 640px) {
-    .page-shell {
-      /* max-width: 640px; */
-      padding: 1px;
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
     }
-  }
-  @media (min-width: 768px) {
-    .page-shell {
-      max-width: 768px;
-    }
-  }
-  @media (min-width: 1024px) {
-    .page-shell {
-      max-width: 1024px;
-    }
-  }
-  @media (min-width: 1280px) {
-    .page-shell {
-      max-width: 1200px; /* or whatever your other pages use */
+    to {
+      opacity: 1;
     }
   }
 
-  .page-header {
+  /* Card Styles */
+  .card {
+    background: white;
+    border-radius: 20px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
+    overflow: hidden;
+  }
+
+  .table-card {
+    padding: 0;
+  }
+
+  .text-muted {
+    color: #6b7280;
+    font-size: 0.875rem;
+    margin: 4px 0 0 0;
+  }
+
+  .small {
+    font-size: 0.75rem;
+  }
+
+  .truncate {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+
+  /* Table Header Row */
+  .card-header-row {
     display: flex;
-    align-items: center; /* Center alignment */
     justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 24px;
-    flex-wrap: wrap;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid #f3f4f6;
+    background: rgba(248, 250, 252, 0.5);
   }
 
-  .page-title h1 {
+  .card-title {
     margin: 0;
     font-size: 20px;
     font-weight: 600;
-    color: #1e293b;
-    letter-spacing: -0.02em;
+    color: #111827;
+    display: inline-block;
   }
-  .muted {
-    color: #64748b;
-    margin: 0;
-    font-size: 14px;
-  }
-
-  .page-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-  }
-
-  /* Mobile: Header stacks, Actions full width side-by-side */
-  @media (max-width: 640px) {
-    .page-header {
+  @media (max-width: 900px) {
+    .card-header-row {
       flex-direction: column;
-      align-items: stretch; /* Full width children */
-      gap: 16px;
+      align-items: stretch;
+      gap: 12px;
     }
-    .page-title {
-      text-align: left;
+    .toolbar {
+      padding: 14px 16px;
     }
-    .page-actions {
+    .search-wrapper {
+      flex: 1 1 100%;
+    }
+    .filter-select {
       width: 100%;
-      margin-top: 0; /* Handled by header gap */
-      justify-content: space-between;
     }
-    .page-actions button {
-      flex: 1; /* Equal width */
-      justify-content: center;
-      width: 50%; /* Ensure they take space */
-    }
-  }
-
-  /* Cards */
-  .card {
-    background: white;
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    box-shadow:
-      0 1px 3px 0 rgba(0, 0, 0, 0.1),
-      0 1px 2px -1px rgba(0, 0, 0, 0.1);
-    /* overflow: hidden; */
-  }
-  .card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .card-header h3 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 700;
-    color: #1e293b;
   }
 
   .badge-count {
     background: #f1f5f9;
     color: #64748b;
-    font-size: 12px;
-    font-weight: 600;
     padding: 4px 10px;
-    border-radius: 99px;
-  }
-  .border-b {
-    border-bottom: 1px solid #f1f5f9;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
   }
 
   /* Filters */
-  .filters {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)) auto;
-    gap: 16px;
-    align-items: end;
-  }
-  @media (max-width: 900px) {
-    .filters {
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
-  }
-  .field.stretch {
-    flex: 1;
-  }
-  .field {
+  .toolbar {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px 24px;
+    border-bottom: 1px solid #f3f4f6;
+    background: #fafbfd;
   }
-
-  .field.actions {
-    justify-content: flex-end;
-    flex-direction: row;
-    gap: 8px;
-    min-width: 90px;
-  }
-
-  @media (max-width: 900px) {
-    .field.actions {
-      width: 100%;
-      margin-top: 4px;
-    }
-    .circle-btn {
-      flex: 1;
-      border-radius: 999px !important;
-      width: auto !important;
-      height: 40px !important;
-      padding: 0 16px !important;
-    }
-    .btn-text-mobile {
-      display: inline !important;
-      margin-left: 8px;
-    }
-  }
-
-  .field label {
-    font-weight: 600;
-    color: #475569;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-  }
-  .input-icon {
-    position: relative;
+  .search-wrapper {
+    flex: 1 1 320px;
     display: flex;
     align-items: center;
-    width: 100%;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   }
   .search-icon {
-    position: absolute;
-    left: 12px;
-    color: #94a3b8;
+    color: #9ca3af;
+    font-variation-settings: "wght" 550;
   }
-  .input-icon input {
-    padding-left: 38px;
-  }
-
-  input,
-  select {
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    padding: 10px 14px;
-    font-size: 14px;
-    background: #fff;
-    width: 100%;
-    box-sizing: border-box;
-    transition:
-      border-color 0.15s,
-      box-shadow 0.15s;
-    height: 40px;
-  }
-  input:focus,
-  select:focus {
-    outline: none;
-    border-color: #6366f1;
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
-  }
-
-  /* Buttons */
-  .primary,
-  .secondary,
-  .ghost {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border-radius: 999px;
-    font-weight: 600;
-    cursor: pointer;
-    text-decoration: none;
-    border: 1px solid transparent;
-    padding: 0 12px;
-    transition: all 0.15s;
-    font-size: 14px;
-    height: 40px;
-    box-sizing: border-box;
-    white-space: nowrap;
-  }
-  .primary {
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
-    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.1);
+  .search-input {
+    flex: 1;
     border: none;
+    outline: none;
+    font-size: 0.95rem;
+    background: transparent;
+    color: #111827;
   }
-  .primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2);
-  }
-
-  .ghost {
-    background: white;
-    border-color: #e2e8f0;
-    color: #475569;
-  }
-  .ghost:hover {
-    background: #f8fafc;
-    border-color: #cbd5e1;
-    color: #0f172a;
-  }
-  .ghost:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+  .search-input::placeholder {
+    color: #9ca3af;
   }
 
-  /* Circular Buttons */
-  .circle-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 999px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s;
-    padding: 0;
-    color: white;
-    flex-shrink: 0;
-  }
-  .primary-circle {
-    background: #0f172a;
-    color: white;
-  }
-  .primary-circle:hover {
-    background: #1e293b;
-    transform: scale(1.05);
-  }
-
-  .ghost-circle {
-    background: white;
-    border-color: #e2e8f0;
-    color: #64748b;
-  }
-  .ghost-circle:hover {
-    border-color: #ef4444;
-    color: #ef4444;
-    background: #fff5f5;
-    transform: scale(1.05);
-  }
-
-  .btn-text-mobile {
-    display: none;
+  .filter-select {
+    min-width: 180px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    padding: 10px 12px;
+    background: #fff;
     font-weight: 600;
-    font-size: 13px;
+    color: #334155;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   }
 
-  /* Table */
-  .table-container {
-    width: 100%;
-    max-width: 100%;
+  /* Table Styles */
+  .table-responsive {
     overflow-x: auto;
+  }
+
+  .table {
+    width: 100%;
+    min-width: 900px;
+    border-collapse: collapse;
+    font-size: 0.925rem;
   }
   .desktop-only {
     display: block;
@@ -964,10 +937,270 @@
   .mobile-list {
     display: none;
   }
-  .table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
+
+  .table th {
+    text-align: left;
+    padding: 14px 24px;
+    background-color: #f8fafc;
+    color: #64748b;
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .table td {
+    padding: 14px 24px;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: middle;
+  }
+
+  .table-row {
+    transition: background-color 0.15s ease;
+  }
+
+  .table-row:hover {
+    background-color: #f8fafc;
+  }
+
+  .table-row:last-child td {
+    border-bottom: none;
+  }
+
+  /* Task Info in Table */
+  .task-info {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .task-icon-wrapper {
+    width: 32px;
+    height: 32px;
+    background: #6366f1;
+    color: white;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
+  }
+
+  .task-details {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .task-name {
+    font-weight: 600;
+    color: #1f2937;
+  }
+
+  .task-desc {
+    font-size: 0.75rem;
+    color: #6b7280;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* User Info in Table */
+  .user-info {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .avatar-placeholder {
+    width: 32px;
+    height: 32px;
+    background: rgb(15 23 42);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+    box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
+  }
+
+  .text-center {
+    text-align: center;
+  }
+  .text-right {
+    text-align: right;
+    min-width: 150px;
+    white-space: nowrap;
+  }
+
+  .pagination-pill {
+    min-width: 128px;
+  }
+
+  /* Modal z-index helpers */
+  :global(.z-120) {
+    z-index: 120;
+  }
+  :global(.z-110) {
+    z-index: 110;
+  }
+  :global(.z-100) {
+    z-index: 100;
+  }
+
+  /* Status Badges */
+  .status-badge {
+    padding: 5px 12px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    display: inline-block;
+    border: 1px solid transparent;
+  }
+
+  .chip-late {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    background: #fef2f2;
+    color: #b91c1c;
+    text-transform: uppercase;
+    margin-left: 6px;
+  }
+
+  .bg-emerald-100 {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+  }
+  .text-emerald-700 {
+    color: #047857;
+  }
+  .bg-blue-100 {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+  }
+  .text-blue-700 {
+    color: #1d4ed8;
+  }
+  .bg-amber-100 {
+    background: #fefce8;
+    border-color: #fef08a;
+  }
+  .text-amber-700 {
+    color: #a16207;
+  }
+  .bg-rose-100 {
+    background: #fff1f2;
+    border-color: #fecdd3;
+  }
+  .text-rose-700 {
+    color: #be123c;
+  }
+  .bg-indigo-100 {
+    background: #e0e7ff;
+    border-color: #c7d2fe;
+  }
+  .text-indigo-700 {
+    color: #4338ca;
+  }
+  .bg-slate-100 {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+  }
+  .text-slate-600 {
+    color: #475569;
+  }
+  .equal-badge {
+    min-width: 96px;
+    text-align: center;
+    justify-content: center;
+    display: inline-flex;
+  }
+
+  .mono {
+    font-family: ui-monospace, monospace;
+    font-size: 0.85rem;
+  }
+
+  .mono.late {
+    color: #b91c1c;
+    font-weight: 700;
+  }
+
+  /* States */
+  .loading-state {
+    padding: 40px;
+    text-align: center;
+    color: #6b7280;
+  }
+
+  .empty-state {
+    padding: 40px;
+    text-align: center;
+    color: #9ca3af;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid #e5e7eb;
+    border-top: 3px solid #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 12px;
+  }
+
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+
+  .btn-icon {
+    width: 42px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+
+  .flex {
+    display: flex;
+  }
+  .gap-2 {
+    gap: 0.5rem;
+  }
+  .gap-3 {
+    gap: 0.75rem;
+  }
+  .items-center {
+    align-items: center;
+  }
+  .border-b {
+    border-bottom: 1px solid #f1f5f9;
   }
 
   @media (max-width: 900px) {
@@ -977,334 +1210,243 @@
     .mobile-list {
       display: flex;
       flex-direction: column;
+      /* gap: 12px; */
+    }
+    .entry-card {
+      padding: 14px;
+      /* border-radius: 16px; */
+      border-top: 1px solid #e2e8f0;
+      background: #ffffff;
+      box-shadow: 0 6px 20px -18px rgba(15, 23, 42, 0.3);
+    }
+    .entry-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .entry-head .task-details {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .entry-head .task-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #0f172a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .entry-head .text-muted {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .entry-head .task-icon-wrapper {
+      width: 32px;
+      height: 32px;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+    .entry-details {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #f1f5f9;
+    }
+
+    .entry-head .task-info {
+      display: grid;
+      grid-template-columns: 32px 1fr;
       gap: 12px;
+      align-items: center;
+      flex: 1;
+      min-width: 0;
     }
-  }
 
-  .table th {
-    text-align: left;
-    padding: 14px 24px;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    color: #64748b;
-    background: #fcfcfc;
-    border-bottom: 1px solid #e2e8f0;
-  }
-  .table td {
-    padding: 16px 24px;
-    border-bottom: 1px solid #f1f5f9;
-    vertical-align: middle;
-    font-size: 14px;
-    color: #334155;
-  }
-  .hover-row:hover td {
-    background-color: #f8fafc;
-    cursor: pointer;
-  }
-
-  .action-cell {
-    white-space: nowrap;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-  .mini-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    border: 1px solid #0f172a;
-    background: #0f172a;
-    color: #fff;
-    font-weight: 600;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .mini-btn.icon-only {
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    justify-content: center;
-  }
-  .mini-btn:hover {
-    background: #111827;
-    border-color: #111827;
-  }
-
-  .mini-btn.mobile {
-    flex: 1;
-    justify-content: center;
-    padding: 8px;
-    height: 40px;
-  }
-  .btn-text {
-    display: none;
-  }
-  @media (max-width: 900px) {
-    .mini-btn.mobile .btn-text {
-      display: inline;
+    .detail-row {
+      margin-bottom: 16px;
+    }
+    .detail-row:last-child {
+      margin-bottom: 0;
+    }
+    .detail-label {
+      font-size: 11px;
       font-weight: 700;
-      font-size: 12px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .detail-value {
+      font-weight: 600;
+      color: #0f172a;
+      font-size: 14px;
+    }
+
+    .expand-btn {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: #f8fafc;
+      color: #64748b;
+      border: none;
+    }
+    .mobile-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .mini-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 9999px;
+      border: 1px solid #0f172a;
+      background: #0f172a;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      flex: 1;
+      justify-content: center;
+    }
+
+    .mini-btn-circle {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 9999px;
+      border: 1px solid #0f172a;
+      background: #0f172a;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      /* flex: 1; */
+      width: 42px;
+      height: 42px;
+      justify-content: center;
+    }
+
+    .mini-btn .btn-text {
+      display: inline;
+    }
+    .mini-btn.danger {
+      background: #ef4444;
+      border-color: #ef4444;
     }
   }
 
-  /* User Info & Chips */
-  .user-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  /* Animations */
+  .animate-fade-in {
+    opacity: 0;
+    animation: fadeIn 0.6s ease-out forwards;
   }
-  .avatar-mini {
-    width: 28px;
-    height: 28px;
-    border-radius: 999px;
-    background: #0f172a;
-    color: white;
-    font-weight: 700;
-    font-size: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .animate-slide-up {
+    opacity: 0;
+    animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
-
-  /* Badges */
-  .status-badge {
-    display: inline-flex;
-    padding: 4px 10px;
-    border-radius: 99px;
-    font-size: 12px;
-    font-weight: 600;
-    border: 1px solid transparent;
-    white-space: nowrap;
-  }
-  .chip {
-    padding: 2px 6px;
-    border-radius: 6px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-  }
-  .chip.danger {
-    background: #fef2f2;
-    color: #b91c1c;
-  }
-
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 99px;
-    font-weight: 600;
-    font-size: 12px;
-    border: 1px solid transparent;
-  }
-  .pill.priority {
-    background: white;
-    border: 1px dashed #cbd5e1;
-    color: #475569;
-  }
-  .pill.small {
-    padding: 2px 8px;
-    font-size: 11px;
-  }
-
-  .tone-rose {
-    color: #be123c;
-    border-color: #fecdd3;
-    background: #fff1f2;
-  }
-  .tone-amber {
-    color: #b45309;
-    border-color: #fde68a;
-    background: #fffbeb;
-  }
-  .tone-emerald {
-    color: #047857;
-    border-color: #a7f3d0;
-    background: #ecfdf3;
-  }
-  .tone-blue {
-    color: #be123c;
-    border-color: #bfdbfe;
-    background: #eff6ff;
-  }
-  .tone-slate {
-    color: #475569;
-    border-color: #e2e8f0;
-    background: #f1f5f9;
-  }
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-  }
-
-  .mono {
-    font-family: ui-monospace, monospace;
-    color: #475569;
-  }
-  .mono.late {
-    color: #b91c1c;
-    font-weight: 700;
-  }
-
-  /* Mobile Entry Card */
-  .entry-card {
-    padding: 8px;
-    /* border-radius: 16px;
-    border: 1px solid #e2e8f0; */
-    background: #ffffff;
-    border-bottom: 1px solid #e2e8f0;
-    padding-bottom: 24px;
-    box-shadow: 0 6px 20px -18px rgba(15, 23, 42, 0.3);
-    cursor: pointer;
-    transition: transform 0.1s;
-  }
-  .entry-card:active {
-    transform: scale(0.98);
-  }
-
-  .entry-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-  .title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    overflow: hidden;
-    min-width: 0;
-    flex: 1;
-  }
-  .task-icon {
-    color: #6366f1;
-    font-size: 20px;
-    flex-shrink: 0;
-  }
-  .task-title {
-    font-weight: 700;
-    font-size: 15px;
-    color: #0f172a;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .intern-grid {
-    margin-bottom: 12px;
-    display: flex;
-  }
-  .intern-box {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    background: #f8fafc;
-    border-radius: 8px;
-    border: 1px solid #f1f5f9;
-  }
-  .intern-box-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: #334155;
-  }
-
-  .info-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-  .info-box {
-    padding: 5px;
-    background: #f8fafc;
-    border: 1px solid #f1f5f9;
-    border-radius: 10px;
-    text-align: center;
-  }
-  .info-box .label {
-    font-size: 10px;
-    text-transform: uppercase;
-    color: #94a3b8;
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-  .info-box .value {
-    font-weight: 600;
-    color: #334155;
-    font-size: 13px;
-    font-family: ui-monospace, monospace;
-  }
-
-  .mobile-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  /* Loading & Empty */
-  .loading-state,
-  .empty-state {
-    padding: 40px;
-    text-align: center;
-    color: #94a3b8;
-  }
-  .spinner {
-    width: 30px;
-    height: 30px;
-    border: 3px solid #e2e8f0;
-    border-top-color: #6366f1;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin: 0 auto 10px;
-  }
-  @keyframes spin {
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
     to {
-      transform: rotate(360deg);
+      opacity: 1;
+      transform: translateY(0);
     }
   }
-  .empty {
-    font-size: 32px;
-    margin-bottom: 10px;
+
+  .mt-3 {
+    margin-top: 0.75rem;
+  }
+  .mt-4 {
+    margin-top: 1rem;
+  }
+  .pt-4 {
+    padding-top: 1rem;
+  }
+  .border-t {
+    border-top: 1px solid;
+  }
+  .border-slate-100 {
+    border-color: #f1f5f9;
   }
 
-  .pager {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    margin-top: 24px;
-  }
+  /* Mobile Grid Styles */
+  @media (max-width: 900px) {
+    .intern-grid {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .intern-box {
+      padding: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .intern-box .avatar-mini {
+      width: 28px;
+      height: 28px;
+      background: #0f172a;
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      overflow: hidden;
+      position: relative;
+    }
+    .intern-box-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #334155;
+    }
 
-  .page-header,
-  .page-actions,
-  .title-row,
-  .user-info,
-  .intern-box {
-    min-width: 0;
-  }
-
-  /* Action Buttons - Standardized */
-  .btn-icon {
-    background: transparent;
-    border: none;
-    color: #94a3b8;
-    cursor: pointer;
-    padding: 6px;
-    border-radius: 6px;
-    transition: all 0.2s;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .btn-icon:hover {
-    background: #e2e8f0;
-    color: #0f172a;
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .detail-box {
+      padding: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #f8fafc;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .detail-box .label {
+      margin: 0 0 6px 0;
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .detail-box .value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+    }
   }
 </style>

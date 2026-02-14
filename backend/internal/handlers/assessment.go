@@ -134,8 +134,8 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, a.intern_id, a.task_id, a.assessed_by, a.score, a.category, a.aspect,
 		       a.quality_score, a.speed_score, a.initiative_score, a.teamwork_score, a.communication_score,
 		       a.strengths, a.improvements, a.comments, a.notes, a.assessment_date, a.created_at, a.updated_at,
-		       iu.name, 
-			   COALESCE(u_sup.name, u_direct.name), 
+		       iu.name, iu.avatar, 
+			   COALESCE(u_sup.name, u_direct.name), COALESCE(u_sup.avatar, u_direct.avatar), 
 			   COALESCE(u_sup.role, u_direct.role), 
 			   t.title
 	` + baseFrom + " " + whereClause + " ORDER BY a.created_at DESC LIMIT ? OFFSET ?"
@@ -152,18 +152,24 @@ func (h *AssessmentHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	var assessments []map[string]interface{}
 	for rows.Next() {
 		var a models.Assessment
-		var internName, assessorName, assessorRole, taskTitle sql.NullString
+		var internName, internAvatar, assessorName, assessorAvatar, assessorRole, taskTitle sql.NullString
 		if err := rows.Scan(
 			&a.ID, &a.InternID, &a.TaskID, &a.AssessedBy, &a.Score, &a.Category, &a.Aspect,
 			&a.QualityScore, &a.SpeedScore, &a.InitiativeScore, &a.TeamworkScore, &a.CommunicationScore,
 			&a.Strengths, &a.Improvements, &a.Comments, &a.Notes, &a.AssessmentDate, &a.CreatedAt, &a.UpdatedAt,
-			&internName, &assessorName, &assessorRole, &taskTitle,
+			&internName, &internAvatar, &assessorName, &assessorAvatar, &assessorRole, &taskTitle,
 		); err == nil {
 			if internName.Valid {
 				a.InternName = internName.String
 			}
+			if internAvatar.Valid {
+				a.InternAvatar = internAvatar.String
+			}
 			if assessorName.Valid {
 				a.AssessorName = assessorName.String
+			}
+			if assessorAvatar.Valid {
+				a.AssessorAvatar = assessorAvatar.String
 			}
 			// Temporarily store role in struct if model supports it, or just pass to presentAssessment map
 			// Since models.Assessment might not have AssessorRole, we can handle it here or update model.
@@ -198,8 +204,8 @@ func (h *AssessmentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, a.intern_id, a.task_id, a.assessed_by, a.score, a.category, a.aspect,
 		       a.quality_score, a.speed_score, a.initiative_score, a.teamwork_score, a.communication_score,
 		       a.strengths, a.improvements, a.comments, a.notes, a.assessment_date, a.created_at, a.updated_at,
-		       iu.name, 
-			   COALESCE(u_sup.name, u_direct.name), 
+		       iu.name, iu.avatar, 
+			   COALESCE(u_sup.name, u_direct.name), COALESCE(u_sup.avatar, u_direct.avatar), 
 			   COALESCE(u_sup.role, u_direct.role), 
 			   t.title
 		FROM assessments a
@@ -213,12 +219,12 @@ func (h *AssessmentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	`
 
 	var a models.Assessment
-	var internName, assessorName, assessorRole, taskTitle sql.NullString
+	var internName, internAvatar, assessorName, assessorAvatar, assessorRole, taskTitle sql.NullString
 	err := h.db.QueryRow(query, id).Scan(
 		&a.ID, &a.InternID, &a.TaskID, &a.AssessedBy, &a.Score, &a.Category, &a.Aspect,
 		&a.QualityScore, &a.SpeedScore, &a.InitiativeScore, &a.TeamworkScore, &a.CommunicationScore,
 		&a.Strengths, &a.Improvements, &a.Comments, &a.Notes, &a.AssessmentDate, &a.CreatedAt, &a.UpdatedAt,
-		&internName, &assessorName, &assessorRole, &taskTitle,
+		&internName, &internAvatar, &assessorName, &assessorAvatar, &assessorRole, &taskTitle,
 	)
 	if err == sql.ErrNoRows {
 		utils.RespondNotFound(w, "Assessment not found")
@@ -240,8 +246,14 @@ func (h *AssessmentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	if internName.Valid {
 		a.InternName = internName.String
 	}
+	if internAvatar.Valid {
+		a.InternAvatar = internAvatar.String
+	}
 	if assessorName.Valid {
 		a.AssessorName = assessorName.String
+	}
+	if assessorAvatar.Valid {
+		a.AssessorAvatar = assessorAvatar.String
 	}
 	if taskTitle.Valid {
 		a.TaskTitle = taskTitle.String
@@ -574,7 +586,9 @@ func presentAssessment(a models.Assessment) map[string]interface{} {
 		"created_at":          a.CreatedAt,
 		"updated_at":          a.UpdatedAt,
 		"intern_name":         a.InternName,
+		"intern_avatar":       a.InternAvatar,
 		"assessor_name":       a.AssessorName,
+		"assessor_avatar":     a.AssessorAvatar,
 		"task_title":          a.TaskTitle,
 	}
 }

@@ -142,7 +142,7 @@ func (h *InternHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(i.nis,''), COALESCE(i.student_id,''), COALESCE(i.school,''), COALESCE(i.department,''),
 		       i.date_of_birth, COALESCE(i.gender,''), COALESCE(i.phone,''), COALESCE(i.address,''),
 		       i.start_date, i.end_date, i.status, i.certificate_number, i.certificate_issued_at, i.created_at, i.updated_at,
-		       u.email, COALESCE(su.name,''), COALESCE(inst.name,'')
+		       u.email, u.avatar, COALESCE(su.name,''), COALESCE(inst.name,'')
 	` + baseFrom + " " + whereClause + " ORDER BY i.created_at DESC LIMIT ? OFFSET ?"
 
 	args = append(args, limit, offset)
@@ -158,19 +158,21 @@ func (h *InternHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var i models.Intern
 		var email, supervisorName, institutionName string
+		var avatar sql.NullString
 
 		if err := rows.Scan(
 			&i.ID, &i.UserID, &i.InstitutionID, &i.SupervisorID, &i.FullName,
 			&i.NIS, &i.StudentID, &i.School, &i.Department,
 			&i.DateOfBirth, &i.Gender, &i.Phone, &i.Address,
 			&i.StartDate, &i.EndDate, &i.Status, &i.CertificateNumber, &i.CertificateIssuedAt, &i.CreatedAt, &i.UpdatedAt,
-			&email, &supervisorName, &institutionName,
+			&email, &avatar, &supervisorName, &institutionName,
 		); err == nil {
 			interns = append(interns, models.InternWithDetails{
 				Intern:          i,
 				SupervisorName:  supervisorName,
 				InstitutionName: institutionName,
 				Email:           email,
+				Avatar:          avatar,
 			})
 		}
 	}
@@ -210,7 +212,7 @@ func (h *InternHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(i.nis,''), COALESCE(i.student_id,''), COALESCE(i.school,''), COALESCE(i.department,''),
 		       i.date_of_birth, COALESCE(i.gender,''), COALESCE(i.phone,''), COALESCE(i.address,''),
 		       i.start_date, i.end_date, i.status, i.certificate_number, i.certificate_issued_at, i.created_at, i.updated_at,
-		       u.email, COALESCE(su.name,''), COALESCE(inst.name,'')
+		       u.email, u.avatar, COALESCE(su.name,''), COALESCE(inst.name,'')
 		FROM interns i
 		JOIN users u ON i.user_id = u.id
 		LEFT JOIN users su ON i.supervisor_id = su.id
@@ -220,12 +222,13 @@ func (h *InternHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	var i models.Intern
 	var email, supervisorName, institutionName string
+	var avatar sql.NullString
 	err = h.db.QueryRow(query, internID).Scan(
 		&i.ID, &i.UserID, &i.InstitutionID, &i.SupervisorID, &i.FullName,
 		&i.NIS, &i.StudentID, &i.School, &i.Department,
 		&i.DateOfBirth, &i.Gender, &i.Phone, &i.Address,
 		&i.StartDate, &i.EndDate, &i.Status, &i.CertificateNumber, &i.CertificateIssuedAt, &i.CreatedAt, &i.UpdatedAt,
-		&email, &supervisorName, &institutionName,
+		&email, &avatar, &supervisorName, &institutionName,
 	)
 	if err == sql.ErrNoRows {
 		utils.RespondNotFound(w, "Intern not found")
@@ -241,6 +244,7 @@ func (h *InternHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		SupervisorName:  supervisorName,
 		InstitutionName: institutionName,
 		Email:           email,
+		Avatar:          avatar,
 	}
 
 	utils.RespondSuccess(w, "Intern retrieved", presentIntern(result))
@@ -660,6 +664,7 @@ func presentIntern(it models.InternWithDetails) map[string]interface{} {
 		"email":                 it.Email,
 		"supervisor_name":       it.SupervisorName,
 		"institution_name":      it.InstitutionName,
+		"avatar":                nullStringToPtr(it.Avatar),
 	}
 }
 

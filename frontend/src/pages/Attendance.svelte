@@ -1,29 +1,45 @@
 <script>
   import { onMount } from "svelte";
-  import { route } from "@mateothegreat/svelte5-router";
+  import { slide } from "svelte/transition";
   import { api } from "../lib/api.js";
+  import { portal } from "../lib/portal.js";
   import { auth } from "../lib/auth.svelte.js";
+  import { getAvatarUrl } from "../lib/utils.js";
 
   // State
   let records = $state([]);
-  let todayAttendance = $state(null);
   let loading = $state(false);
+  let searchQuery = $state("");
+  let filterStatus = $state("");
+  let filterDate = $state("");
+  let currentPage = $state(1);
+  let totalPages = $state(1);
+  let totalItems = $state(0);
+  let searchTimeout;
+  let expandedRecords = $state({});
+
+  // Detail Modal State
   let detailOpen = $state(false);
   let detailLoading = $state(false);
   let detail = $state(null);
+
+  // Document Modal State
   let docOpen = $state(false);
   let docUrl = $state("");
 
-  // Permission Form State
-  let permissionStatus = $state("sick");
-  let permissionNotes = $state("");
-  let permissionFile = $state(null);
-  /** @type {HTMLInputElement} */
-  let fileInput;
-
-  // --- STATE LOADING TERPISAH (SOLUSI) ---
-  let isCheckingIn = $state(false); // Khusus Check In/Out
-  let isSubmittingPermission = $state(false); // Khusus Kirim Izin
+  // Keep overlay-root click-through state in sync with our modals
+  $effect(() => {
+    const root =
+      typeof document !== "undefined"
+        ? document.querySelector("#overlay-root")
+        : null;
+    if (!(root instanceof HTMLElement)) return;
+    const hasModal = detailOpen || docOpen;
+    root.style.pointerEvents = hasModal ? "auto" : "none";
+    if (!hasModal) {
+      root.dataset.portalCount = "0";
+    }
+  });
 
   // Labels & Colors
   const statusLabels = {
@@ -52,7 +68,7 @@
   }
 
   function formatDate(value) {
-    if (!value) return "-";
+    if (!value) return "—";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleDateString("id-ID", {
@@ -90,6 +106,54 @@
     return `${base}${normalized}${tokenQS}`;
   }
 
+  function isImageFile(url) {
+    if (!url) return false;
+    return /\.(jpg|jpeg|png|webp|gif|svg)($|\?)/i.test(url);
+  }
+
+  // --- Fetch Data ---
+  async function fetchAttendance() {
+    loading = true;
+    try {
+      const params = { page: currentPage, limit: 50 };
+      if (searchQuery) params.search = searchQuery;
+      if (filterStatus) params.status = filterStatus;
+      if (filterDate) params.date = filterDate;
+
+      const res = await api.getAttendance(params);
+      records = res.data || [];
+      const pagination = res.pagination || {};
+      totalPages = Math.max(pagination.total_pages || 1, 1);
+      totalItems = pagination.total_items || 0;
+      currentPage = pagination.page || currentPage;
+      console.log("Fetched attendance:", records);
+    } catch (err) {
+      console.error("Failed to fetch attendance:", err);
+      alert("Gagal memuat data presensi: " + err.message);
+    } finally {
+      loading = false;
+    }
+  }
+
+  function goToPreviousPage() {
+    currentPage = Math.max(1, currentPage - 1);
+    fetchAttendance();
+  }
+
+  function goToNextPage() {
+    if (currentPage >= totalPages) return;
+    currentPage += 1;
+    fetchAttendance();
+  }
+
+  function handleSearchInput() {
+    clearTimeout(searchTimeout);
+    currentPage = 1;
+    searchTimeout = setTimeout(() => {
+      fetchAttendance();
+    }, 500);
+  }
+
   async function openDetail(id) {
     detailOpen = true;
     detailLoading = true;
@@ -99,6 +163,7 @@
       detail = res.data;
     } catch (err) {
       console.error(err);
+      alert("Gagal memuat detail: " + err.message);
     } finally {
       detailLoading = false;
     }
@@ -120,153 +185,6 @@
     docUrl = "";
   }
 
-  function isImageFile(url) {
-    if (!url) return false;
-    return /\.(jpg|jpeg|png|webp|gif|svg)($|\?)/i.test(url);
-  }
-
-  function rowTint(status) {
-    switch (status) {
-      case "present":
-        return "bg-emerald-50";
-      case "late":
-        return "bg-amber-50";
-      case "permission":
-        return "bg-purple-50";
-      case "sick":
-        return "bg-blue-50";
-      case "absent":
-        return "bg-rose-50";
-      default:
-        return "";
-    }
-  }
-
-  async function fetchAttendance() {
-    loading = true;
-    try {
-      if (auth.user?.role === "intern") {
-        const todayRes = await api.getTodayAttendance();
-        todayAttendance =
-          todayRes.data?.today_attendance || todayRes.data || null;
-
-        const historyRes = await api.getAttendance({ page: 1, limit: 10 });
-        records = historyRes.data || [];
-      } else {
-        const res = await api.getAttendance({ page: 1, limit: 20 });
-        records = res.data || [];
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      loading = false;
-    }
-  }
-
-  const statusBadge = (status) => {
-    switch (status) {
-      case "present":
-        return {
-          text: "Hadir",
-          cls: "bg-emerald-100 text-emerald-700 border-emerald-200",
-        };
-      case "late":
-        return {
-          text: "Terlambat",
-          cls: "bg-amber-100 text-amber-700 border-amber-200",
-        };
-      case "permission":
-        return {
-          text: "Izin",
-          cls: "bg-purple-100 text-purple-700 border-purple-200",
-        };
-      case "sick":
-        return {
-          text: "Sakit",
-          cls: "bg-blue-100 text-blue-700 border-blue-200",
-        };
-      case "absent":
-        return {
-          text: "Tidak Hadir",
-          cls: "bg-rose-100 text-rose-700 border-rose-200",
-        };
-      default:
-        return {
-          text: status || "-",
-          cls: "bg-slate-100 text-slate-600 border-slate-200",
-        };
-    }
-  };
-
-  function getPosition() {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error("Geolocation tidak didukung browser ini."));
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
-        enableHighAccuracy: true,
-      });
-    });
-  }
-
-  // --- LOGIC CHECK IN/OUT ---
-  async function handleCheckIn() {
-    isCheckingIn = true; // Pakai variable khusus
-    try {
-      const pos = await getPosition();
-      await api.checkIn(pos.coords.latitude, pos.coords.longitude);
-      alert("Berhasil Check-in!");
-      await fetchAttendance();
-    } catch (err) {
-      alert(err.message || "Gagal check-in. Pastikan izin lokasi aktif.");
-    } finally {
-      isCheckingIn = false;
-    }
-  }
-
-  async function handleCheckOut() {
-    if (!confirm("Apakah Anda yakin ingin Check-out sekarang?")) return;
-    isCheckingIn = true; // Pakai variable khusus
-    try {
-      const pos = await getPosition();
-      await api.checkOut(pos.coords.latitude, pos.coords.longitude);
-      alert("Berhasil Check-out!");
-      await fetchAttendance();
-    } catch (err) {
-      alert(err.message || "Gagal check-out");
-    } finally {
-      isCheckingIn = false;
-    }
-  }
-
-  // --- LOGIC PERMISSION ---
-  async function handlePermissionSubmit() {
-    if (!permissionNotes) {
-      alert("Mohon isi catatan/alasan.");
-      return;
-    }
-    isSubmittingPermission = true; // Pakai variable khusus
-    try {
-      await api.submitPermission({
-        status: permissionStatus,
-        notes: permissionNotes,
-        proof_file: permissionFile,
-      });
-      alert("Pengajuan izin berhasil dikirim.");
-
-      permissionNotes = "";
-      permissionFile = null;
-      if (fileInput) fileInput.value = "";
-
-      await fetchAttendance();
-    } catch (err) {
-      alert(err.message || "Gagal mengajukan izin");
-    } finally {
-      isSubmittingPermission = false;
-    }
-  }
-
   async function handleDelete(id) {
     if (!confirm("Apakah Anda yakin ingin menghapus data presensi ini?"))
       return;
@@ -280,197 +198,263 @@
     }
   }
 
-  onMount(fetchAttendance);
+  function toggleExpand(id) {
+    expandedRecords[id] = !expandedRecords[id];
+  }
+
+  onMount(async () => {
+    await fetchAttendance();
+  });
 </script>
 
-<!-- <div class="page-bg"> -->
-<div class="container animate-fade-in">
-  <!-- Header -->
-  <!-- <div class="header">
-        <div>
-            <h2 class="title">Presensi & Kehadiran</h2>
-            <p class="subtitle">Kelola jam kerja dan riwayat kehadiran Anda.</p>
-        </div>
-        <div class="header-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                <line x1="16" y1="2" x2="16" y2="6"></line>
-                <line x1="8" y1="2" x2="8" y2="6"></line>
-                <line x1="3" y1="10" x2="21" y2="10"></line>
-                <path d="M12 14h.01"></path>
-            </svg>
-        </div>
-    </div> -->
-
-  <!-- {#if auth.user?.role === 'intern'}
-        <div class="grid-layout animate-slide-up"> -->
-
-  <!-- ABSENSI CARD -->
-  <!-- <div class="card main-action-card">
-                <div class="card-header">
-                    <h3>Status Hari Ini</h3>
-                    <div class="date-badge">
-                        {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })}
-                    </div>
-                </div>
-
-                <div class="status-display">
-                    {#if todayAttendance && todayAttendance.status}
-                        <div class={`status-circle ${todayAttendance.status === 'present' ? 'status-green' : 'status-yellow'}`}>
-                            <span class="status-text">{statusLabels[todayAttendance.status] || todayAttendance.status}</span>
-                            <span class="time-text">
-                                {todayAttendance.check_in_time ? formatTime(todayAttendance.check_in_time) : '--:--'}
-                            </span>
-                        </div>
-                    {:else}
-                        <div class="status-circle status-gray">
-                            <span class="status-text">Belum Absen</span>
-                            <span class="time-text">--:--</span>
-                        </div>
-                    {/if}
-                </div>
-
-                <div class="action-buttons">
-                    <button 
-                        class="btn-checkin" 
-                        onclick={handleCheckIn} 
-                        disabled={isCheckingIn || (todayAttendance && todayAttendance.check_in_time)}
-                    >
-                        {#if isCheckingIn && !todayAttendance?.check_in_time}
-                            <div class="spinner-small"></div>
-                        {:else}
-                            <div class="btn-icon">📍</div>
-                        {/if}
-                        <span>Check In</span>
-                    </button>
-                    
-                    <button 
-                        class="btn-checkout" 
-                        onclick={handleCheckOut} 
-                        disabled={isCheckingIn || !todayAttendance || !todayAttendance.check_in_time || todayAttendance.check_out_time}
-                    >
-                        {#if isCheckingIn && todayAttendance?.check_in_time}
-                            <div class="spinner-small dark"></div>
-                        {:else}
-                            <div class="btn-icon">👋</div>
-                        {/if}
-                        <span>Check Out</span>
-                    </button>
-                </div>
-            </div> -->
-
-  <!-- FORM IZIN CARD -->
-  <!-- <div class="card permission-card">
-                <div class="card-header">
-                    <h3>Pengajuan Izin / Sakit</h3>
-                </div>
-                <div class="form-content">
-                    <div class="form-group">
-                        <label class="label" for="perm-status">Kategori</label>
-                        <div class="radio-group">
-                            <label class={`radio-btn ${permissionStatus === 'sick' ? 'active' : ''}`}>
-                                <input type="radio" value="sick" bind:group={permissionStatus} hidden>
-                                🤒 Sakit
-                            </label>
-                            <label class={`radio-btn ${permissionStatus === 'permission' ? 'active' : ''}`}>
-                                <input type="radio" value="permission" bind:group={permissionStatus} hidden>
-                                📝 Izin
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="label" for="perm-notes">Keterangan</label>
-                        <textarea class="textarea" id="perm-notes" rows="3" placeholder="Jelaskan alasan Anda..." bind:value={permissionNotes}></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="label" for="file-upload">Bukti Pendukung (Opsional)</label>
-                        <label class="file-drop" for="file-upload">
-                            {#if permissionFile}
-                                <span class="file-name">{permissionFile.name}</span>
-                            {:else}
-                                <span class="placeholder">Klik untuk upload surat dokter/dokumen</span>
-                            {/if}
-                            <input 
-                                id="file-upload" 
-                                type="file" 
-                                hidden 
-                                bind:this={fileInput}
-                                onchange={(e) => permissionFile = e.currentTarget.files?.[0] || null}
-                            >
-                        </label>
-                    </div> -->
-
-  <!-- Gunakan isSubmittingPermission -->
-  <!-- <button class="btn-submit" onclick={handlePermissionSubmit} disabled={isSubmittingPermission}>
-                        {isSubmittingPermission ? 'Mengirim...' : 'Kirim Pengajuan'}
-                    </button>
-                </div>
-            </div> -->
-  <!-- </div>
-    {/if} -->
-
-  <!-- TABEL RIWAYAT -->
-
-  <div
-    class="card-header border-b"
-    style="justify-content: flex-start; gap: 12px;"
-  >
-    <h3>Riwayat Presensi</h3>
-    <span class="badge-count">{records.length} Data</span>
+<div class="page-container animate-fade-in">
+  <div class="flex items-center gap-3 pb-8">
+    <h4 class="card-title">Presensi & Kehadiran</h4>
+    <span class="badge-count">{records.length} dari {totalItems} Data</span>
   </div>
 
-  <div class="card list-card animate-slide-up" style="animation-delay: 0.1s;">
+  <!-- BAGIAN TABEL DAFTAR -->
+  <div class="card table-card animate-slide-up" style="animation-delay: 0.1s;">
+    <div class="card-header-row border-b">
+      <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          onclick={() => {
+            searchQuery = "";
+            filterStatus = "";
+            filterDate = "";
+            currentPage = 1;
+            fetchAttendance();
+          }}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"
+            ></polygon></svg
+          >
+          <span>Clear</span>
+        </button>
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          onclick={fetchAttendance}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path
+              d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"
+            /></svg
+          >
+          <span>Refresh</span>
+        </button>
+      </div>
+      <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {totalPages <=
+          1
+            ? 'opacity-40 cursor-not-allowed'
+            : ''}"
+          onclick={goToPreviousPage}
+          disabled={currentPage <= 1 || totalPages <= 1}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><path d="M15 18l-6-6 6-6" /></svg
+          >
+          <span>Prev</span>
+        </button>
+
+        <div
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 pagination-pill {totalPages <=
+          1
+            ? 'opacity-40'
+            : ''}"
+        >
+          <span>{currentPage}</span>
+          <span class="text-slate-500">of</span>
+          <span>{totalPages}</span>
+        </div>
+
+        <button
+          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {totalPages <=
+          1
+            ? 'opacity-40 cursor-not-allowed'
+            : ''}"
+          onclick={goToNextPage}
+          disabled={currentPage >= totalPages || totalPages <= 1}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg
+          >
+          <span>Next</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="search-wrapper">
+        <span class="material-symbols-outlined search-icon">search</span>
+        <input
+          type="text"
+          bind:value={searchQuery}
+          oninput={handleSearchInput}
+          onkeydown={(e) =>
+            e.key === "Enter" &&
+            (clearTimeout(searchTimeout), fetchAttendance())}
+          placeholder="Cari Nama Intern..."
+          class="search-input"
+        />
+      </div>
+
+      <input
+        type="date"
+        bind:value={filterDate}
+        onchange={fetchAttendance}
+        class="filter-select"
+      />
+
+      <select
+        bind:value={filterStatus}
+        onchange={fetchAttendance}
+        class="filter-select"
+      >
+        <option value="">Semua Status</option>
+        <option value="present">Hadir</option>
+        <option value="late">Terlambat</option>
+        <option value="permission">Izin</option>
+        <option value="sick">Sakit</option>
+        <option value="absent">Tidak Hadir</option>
+      </select>
+    </div>
+
     {#if loading}
-      <div class="loading-state">Memuat data...</div>
+      <div class="loading-state">
+        <div class="spinner"></div>
+        <p>Memuat data...</p>
+      </div>
     {:else if records.length === 0}
-      <div class="empty-state">Belum ada riwayat presensi.</div>
+      <div class="empty-state">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#e5e7eb"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          ><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line
+            x1="16"
+            y1="2"
+            x2="16"
+            y2="6"
+          ></line><line x1="8" y1="2" x2="8" y2="6"></line><line
+            x1="3"
+            y1="10"
+            x2="21"
+            y2="10"
+          ></line></svg
+        >
+        <p>Belum ada riwayat presensi.</p>
+      </div>
     {:else}
-      <div class="table-container desktop-only">
-        <table class="table desktop-table">
+      <div class="table-responsive desktop-only">
+        <table class="table">
           <thead>
             <tr>
-              <th>Tanggal</th>
+              <th>Tanggal & Intern</th>
               <th>Waktu Masuk</th>
               <th>Waktu Keluar</th>
-              <th>Status</th>
-              {#if auth.user?.role !== "intern"}
-                <th>Intern</th>
-              {/if}
-              <th>Aksi</th>
+              <th class="text-center">Status</th>
+              <th class="text-right">Aksi</th>
             </tr>
           </thead>
           <tbody>
             {#each records as r}
-              <tr class={`hover-row ${rowTint(r.status)}`}>
-                <td class="font-medium">
-                  {formatDate(r.date)}
+              <tr class="table-row">
+                <td style="min-width: 220px;">
+                  <div class="attendance-info">
+                    <div class="attendance-icon-wrapper">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"
+                        ></rect>
+                        <line x1="16" y1="2" x2="16" y2="6"></line>
+                        <line x1="8" y1="2" x2="8" y2="6"></line>
+                        <line x1="3" y1="10" x2="21" y2="10"></line>
+                      </svg>
+                    </div>
+                    <div class="attendance-details">
+                      <span class="attendance-date">{formatDate(r.date)}</span>
+                      {#if auth.user?.role !== "intern"}
+                        <div class="user-info-inline">
+                          {#if r.intern_avatar && getAvatarUrl(r.intern_avatar)}
+                            <img
+                              src={getAvatarUrl(r.intern_avatar)}
+                              alt={r.intern_name}
+                              class="w-6 h-6 rounded-full object-cover"
+                            />
+                          {:else}
+                            <div class="avatar-small">
+                              {r.intern_name?.charAt(0) || "U"}
+                            </div>
+                          {/if}
+                          <span class="intern-name-small"
+                            >{r.intern_name || "-"}</span
+                          >
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
                 </td>
-                <td class="text-slate-500">
-                  {formatTime(r.check_in_time)}
-                </td>
-                <td class="text-slate-500">
-                  {formatTime(r.check_out_time)}
-                </td>
-                <td>
+                <td class="text-muted mono">{formatTime(r.check_in_time)}</td>
+                <td class="text-muted mono">{formatTime(r.check_out_time)}</td>
+                <td class="text-center">
                   <span
                     class={`status-badge equal-badge ${getStatusColor(r.status)}`}
                   >
                     {statusLabels[r.status] || r.status || "-"}
                   </span>
                 </td>
-                {#if auth.user?.role !== "intern"}
-                  <td>
-                    <div class="user-info">
-                      <div class="avatar-mini">
-                        {r.intern_name?.charAt(0) || "U"}
-                      </div>
-                      <span>{r.intern_name || "-"}</span>
-                    </div>
-                  </td>
-                {/if}
-                <td class="action-cell">
+                <td class="text-right">
                   <button
                     class="btn-icon text-sky-600 hover:text-sky-700 bg-sky-50 hover:bg-sky-100"
                     onclick={() => openDetail(r.id)}
@@ -490,7 +474,7 @@
                     </svg>
                   </button>
                   <button
-                    class="btn-icon text-sky-600 hover:text-sky-700 bg-sky-50 hover:bg-sky-100 {r.proof_file
+                    class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 {r.proof_file
                       ? ''
                       : 'opacity-40 cursor-not-allowed'}"
                     onclick={() => r.proof_file && openDoc(r.proof_file)}
@@ -511,9 +495,9 @@
                     </svg>
                   </button>
                   <button
-                    class="btn-icon text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100"
+                    class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100"
                     onclick={() => handleDelete(r.id)}
-                    title="Hapus presensi"
+                    title="Hapus"
                   >
                     <svg
                       width="18"
@@ -535,64 +519,105 @@
           </tbody>
         </table>
       </div>
-
       <div class="mobile-list">
         {#each records as r}
-          {@const badge = statusBadge(r.status)}
-          <div class={`entry-card ${rowTint(r.status)}`}>
-            <div class="entry-head">
+          <div class="entry-card">
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="entry-head" onclick={() => toggleExpand(r.id)}>
               <div class="date-row">
                 <span class="material-symbols-outlined date-icon"
                   >calendar_month</span
                 >
                 <span class="date-text">{formatDate(r.date)}</span>
               </div>
-              <span class={`status-badge equal-badge ${badge.cls}`}
-                >{badge.text}</span
-              >
+              <div class="head-right">
+                <span
+                  class={`status-badge equal-badge ${getStatusColor(r.status)}`}
+                >
+                  {statusLabels[r.status] || r.status || "-"}
+                </span>
+                <button class="expand-btn">
+                  <span
+                    class="material-symbols-outlined transition-transform duration-200 {expandedRecords[
+                      r.id
+                    ]
+                      ? 'rotate-180'
+                      : ''}">expand_more</span
+                  >
+                </button>
+              </div>
             </div>
-            {#if auth.user?.role !== "intern"}
-              <div class="intern-grid">
-                <div class="intern-box">
-                  <div class="avatar-mini">
-                    {r.intern_name?.charAt(0) || "U"}
+
+            {#if expandedRecords[r.id]}
+              <div class="entry-details" transition:slide={{ duration: 200 }}>
+                {#if auth.user?.role !== "intern"}
+                  <div class="intern-grid">
+                    <div class="intern-box">
+                      {#if r.intern_avatar && getAvatarUrl(r.intern_avatar)}
+                        <img
+                          src={getAvatarUrl(r.intern_avatar)}
+                          alt={r.intern_name}
+                          class="w-6 h-6 rounded-full object-cover"
+                        />
+                      {:else}
+                        <div class="avatar-mini">
+                          {r.intern_name?.charAt(0) || "U"}
+                        </div>
+                      {/if}
+                      <span class="intern-box-label"
+                        >{r.intern_name || "-"}</span
+                      >
+                    </div>
                   </div>
-                  <span class="intern-box-label">{r.intern_name || "-"}</span>
+                {/if}
+                <div class="time-grid">
+                  <div class="time-box">
+                    <p class="label">Presensi Masuk</p>
+                    <p class="time-value">{formatTime(r.check_in_time)}</p>
+                  </div>
+                  <div class="time-box">
+                    <p class="label">Presensi Keluar</p>
+                    <p class="time-value">{formatTime(r.check_out_time)}</p>
+                  </div>
+                </div>
+                <div class="mobile-actions">
+                  <button
+                    class="mini-btn mobile"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      openDetail(r.id);
+                    }}
+                  >
+                    <span class="material-symbols-outlined">visibility</span>
+                    <span class="btn-text">Detail</span>
+                  </button>
+                  <button
+                    class="mini-btn-circle mobile {r.proof_file
+                      ? ''
+                      : 'disabled'}"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      r.proof_file && openDoc(r.proof_file);
+                    }}
+                    disabled={!r.proof_file}
+                  >
+                    <span class="material-symbols-outlined">attach_file</span>
+                  </button>
+                  <button
+                    class="mini-btn mobile danger"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(r.id);
+                    }}
+                    aria-label="Hapus presensi"
+                  >
+                    <span class="material-symbols-outlined">delete</span>
+                    <span class="btn-text">Hapus</span>
+                  </button>
                 </div>
               </div>
             {/if}
-            <div class="time-grid">
-              <div class="time-box">
-                <p class="label">Presensi Masuk</p>
-                <p class="time-value">{formatTime(r.check_in_time)}</p>
-              </div>
-              <div class="time-box">
-                <p class="label">Presensi Keluar</p>
-                <p class="time-value">{formatTime(r.check_out_time)}</p>
-              </div>
-            </div>
-            <div class="mobile-actions">
-              <button class="mini-btn mobile" onclick={() => openDetail(r.id)}>
-                <span class="material-symbols-outlined">info</span>
-                <span class="btn-text">Detail</span>
-              </button>
-              <button
-                class="mini-btn mobile {r.proof_file ? '' : 'disabled'}"
-                onclick={() => r.proof_file && openDoc(r.proof_file)}
-                disabled={!r.proof_file}
-              >
-                <span class="material-symbols-outlined">attach_file</span>
-                <span class="btn-text">Lampiran</span>
-              </button>
-              <button
-                class="mini-btn mobile danger"
-                onclick={() => handleDelete(r.id)}
-                aria-label="Hapus presensi"
-              >
-                <span class="material-symbols-outlined">delete</span>
-                <span class="btn-text">Hapus</span>
-              </button>
-            </div>
           </div>
         {/each}
       </div>
@@ -600,11 +625,13 @@
   </div>
 </div>
 
+<!-- Detail Modal -->
 {#if detailOpen}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6"
+    use:portal
     onclick={closeDetail}
   >
     <div
@@ -647,20 +674,21 @@
             <p class="text-sm">Memuat detail...</p>
           </div>
         {:else if detail}
-          {@const badge = statusBadge(detail.status)}
           <div class="space-y-6">
             <!-- Status Banner -->
             <div
-              class="flex items-center justify-between p-4 rounded-xl {badge.cls
-                .replace('text-', 'bg-opacity-10 bg-')
-                .replace('border-', 'border-opacity-20 border-')} border"
+              class="flex items-center justify-between p-4 rounded-xl {getStatusColor(
+                detail.status,
+              )} border"
             >
               <div class="flex flex-col">
                 <span
                   class="text-xs font-bold uppercase tracking-wider opacity-70"
                   >Status</span
                 >
-                <span class="font-bold text-lg">{badge.text}</span>
+                <span class="font-bold text-lg"
+                  >{statusLabels[detail.status] || detail.status}</span
+                >
               </div>
               <div class="text-right">
                 <span
@@ -734,18 +762,16 @@
                   <h4 class="text-sm font-bold text-slate-700 mb-2">
                     Bukti Lampiran
                   </h4>
-                  <a
-                    href={withBase(detail.proof_file)}
-                    target="_blank"
-                    rel="noreferrer"
-                    class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all group"
+                  <button
+                    onclick={() => openDoc(detail.proof_file)}
+                    class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all group w-full"
                   >
                     <div
                       class="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center"
                     >
                       <span class="material-symbols-outlined">description</span>
                     </div>
-                    <div class="flex-1">
+                    <div class="flex-1 text-left">
                       <p
                         class="text-sm font-bold text-slate-700 group-hover:text-indigo-700"
                       >
@@ -757,7 +783,7 @@
                       class="material-symbols-outlined text-slate-400 group-hover:text-indigo-500"
                       >open_in_new</span
                     >
-                  </a>
+                  </button>
                 </div>
               {/if}
             </div>
@@ -782,11 +808,13 @@
   </div>
 {/if}
 
+<!-- Document Modal -->
 {#if docOpen}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6"
+    use:portal
     onclick={closeDoc}
   >
     <div
@@ -861,55 +889,26 @@
 {/if}
 
 <style>
-  :global(body) {
-    font-family: "Geist", "Inter", sans-serif;
-    color: #0f172a;
-  }
+  /* Base Layout */
 
-  /* .page-bg {
-    min-height: 100vh;
-    background-color: #f8fafc;
-    background-image: radial-gradient(at 0% 0%, rgba(16, 185, 129, 0.03) 0%, transparent 50%),
-                      radial-gradient(at 100% 100%, rgba(14, 165, 233, 0.03) 0%, transparent 50%);
-    padding: 0px 0px;
-  } */
-
-  .container {
+  .page-container {
+    animation: fadeIn 0.5s ease-out;
     max-width: 1200px;
     margin: 0 auto;
+    width: 100%;
+    padding: 0 16px;
   }
 
-  /* Header */
-  /* .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; } */
-  /* .title { font-size: 28px; font-weight: 800; color: #0f172a; margin: 0 0 6px 0; letter-spacing: -0.02em; } */
-  /* .subtitle { color: #64748b; font-size: 15px; margin: 0; } */
-  .header-icon {
-    width: 48px;
-    height: 48px;
-    background: #ffffff;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #10b981;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
-    border: 1px solid #e2e8f0;
-  }
-
-  /* Layout */
-  .grid-layout {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
-    margin-bottom: 32px;
-  }
-  @media (max-width: 900px) {
-    .grid-layout {
-      grid-template-columns: 1fr;
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
     }
   }
 
-  /* Cards */
+  /* Card Styles */
   .card {
     background: white;
     border-radius: 20px;
@@ -917,244 +916,121 @@
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
     overflow: hidden;
   }
-  .card-header {
-    padding-bottom: 20px;
+
+  .table-card {
+    padding: 0;
+  }
+
+  .text-muted {
+    color: #6b7280;
+    font-size: 0.875rem;
+    margin: 4px 0 0 0;
+  }
+
+  .small {
+    font-size: 0.75rem;
+  }
+
+  /* Table Header Row */
+  .card-header-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid #f3f4f6;
+    background: rgba(248, 250, 252, 0.5);
   }
-  .card-header h3 {
+
+  .card-title {
     margin: 0;
     font-size: 20px;
     font-weight: 600;
-    color: #1e293b;
+    color: #111827;
+    display: inline-block;
   }
-  .border-b {
-    border-bottom: 1px solid #f1f5f9;
+  @media (max-width: 900px) {
+    .card-header-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+    }
+    .toolbar {
+      padding: 14px 16px;
+    }
+    .search-wrapper {
+      flex: 1 1 100%;
+    }
+    .filter-select {
+      width: 100%;
+    }
   }
 
-  /* Main Action Card */
-  .main-action-card {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-  }
-  .date-badge {
-    font-size: 12px;
-    font-weight: 600;
-    color: #64748b;
+  .badge-count {
     background: #f1f5f9;
-    padding: 4px 10px;
-    border-radius: 99px;
-  }
-
-  .status-display {
-    padding: 24px;
-    display: flex;
-    justify-content: center;
-  }
-  .status-circle {
-    width: 140px;
-    height: 140px;
-    border-radius: 50%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    border: 4px solid;
-  }
-  .status-green {
-    background: #ecfdf5;
-    border-color: #10b981;
-    color: #065f46;
-  }
-  .status-yellow {
-    background: #fffbeb;
-    border-color: #f59e0b;
-    color: #92400e;
-  }
-  .status-gray {
-    background: #f8fafc;
-    border-color: #cbd5e1;
     color: #64748b;
-  }
-  .status-red {
-    background: #fef2f2;
-    border-color: #ef4444;
-    color: #991b1b;
-  }
-
-  .status-text {
+    padding: 4px 10px;
+    border-radius: 20px;
     font-size: 14px;
     font-weight: 600;
-    text-transform: uppercase;
-    margin-bottom: 4px;
-  }
-  .time-text {
-    font-size: 28px;
-    font-weight: 800;
-    letter-spacing: -1px;
   }
 
-  .action-buttons {
-    padding: 24px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    background: #f8fafc;
-    border-top: 1px solid #f1f5f9;
-  }
-  .btn-checkin,
-  .btn-checkout {
+  /* Filters */
+  .toolbar {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px 24px;
+    border-bottom: 1px solid #f3f4f6;
+    background: #fafbfd;
+  }
+  .search-wrapper {
+    flex: 1 1 320px;
+    display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 16px;
-    border-radius: 16px;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+  .search-icon {
+    color: #9ca3af;
+    font-variation-settings: "wght" 550;
+  }
+  .search-input {
+    flex: 1;
     border: none;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 0.2s;
+    outline: none;
+    font-size: 0.95rem;
+    background: transparent;
+    color: #111827;
   }
-  .btn-checkin {
-    background: #10b981;
-    color: white;
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-  }
-  .btn-checkin:hover:not(:disabled) {
-    background: #059669;
-    transform: translateY(-2px);
-  }
-  .btn-checkin:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    background: #a7f3d0;
-    box-shadow: none;
+  .search-input::placeholder {
+    color: #9ca3af;
   }
 
-  .btn-checkout {
-    background: white;
-    border: 2px solid #e2e8f0;
-    color: #475569;
-  }
-  .btn-checkout:hover:not(:disabled) {
-    border-color: #ef4444;
-    color: #ef4444;
-    background: #fef2f2;
-  }
-  .btn-checkout:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-icon {
-    font-size: 20px;
-  }
-
-  /* Permission Form */
-  .permission-card {
-    padding: 0 0 24px 0;
-  }
-  .form-content {
-    padding: 0 24px;
-  }
-  .form-group {
-    margin-bottom: 16px;
-  }
-  .label {
-    display: block;
-    font-size: 13px;
+  .filter-select {
+    min-width: 180px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    padding: 10px 12px;
+    background: #fff;
     font-weight: 600;
     color: #334155;
-    margin-bottom: 8px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   }
 
-  .radio-group {
-    display: flex;
-    gap: 12px;
-  }
-  .radio-btn {
-    flex: 1;
-    padding: 10px;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    text-align: center;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    color: #64748b;
-    transition: all 0.2s;
-  }
-  .radio-btn.active {
-    border-color: #10b981;
-    background: #ecfdf5;
-    color: #065f46;
-    font-weight: 600;
-  }
-
-  .textarea {
-    width: 100%;
-    padding: 12px;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    font-family: inherit;
-    font-size: 14px;
-    resize: vertical;
-    box-sizing: border-box;
-  }
-  .textarea:focus {
-    outline: none;
-    border-color: #10b981;
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-  }
-
-  .file-drop {
-    display: block;
-    width: 100%;
-    padding: 16px;
-    border: 2px dashed #cbd5e1;
-    border-radius: 10px;
-    text-align: center;
-    cursor: pointer;
-    color: #64748b;
-    font-size: 13px;
-    box-sizing: border-box;
-    transition: all 0.2s;
-  }
-  .file-drop:hover {
-    border-color: #10b981;
-    background: #f0fdf4;
-  }
-  .file-name {
-    color: #10b981;
-    font-weight: 600;
-  }
-
-  .btn-submit {
-    width: 100%;
-    padding: 12px;
-    background: #0f172a;
-    color: white;
-    border: none;
-    border-radius: 10px;
-    font-weight: 600;
-    font-size: 14px;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .btn-submit:hover:not(:disabled) {
-    background: #1e293b;
-  }
-  .btn-submit:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-  }
-
-  /* Table */
-  .table-container {
+  /* Table Styles */
+  .table-responsive {
     overflow-x: auto;
+  }
+
+  .table {
+    width: 100%;
+    min-width: 900px;
+    border-collapse: collapse;
+    font-size: 0.925rem;
   }
   .desktop-only {
     display: block;
@@ -1162,207 +1038,147 @@
   .mobile-list {
     display: none;
   }
-  .table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-  }
-  @media (max-width: 900px) {
-    .desktop-only {
-      display: none;
-    }
-    .mobile-list {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-  }
 
   .table th {
     text-align: left;
     padding: 14px 24px;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
+    background-color: #f8fafc;
     color: #64748b;
-    background: #fcfcfc;
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     border-bottom: 1px solid #e2e8f0;
   }
+
   .table td {
-    padding: 16px 24px;
+    padding: 14px 24px;
     border-bottom: 1px solid #f1f5f9;
     vertical-align: middle;
-    font-size: 14px;
-    color: #334155;
   }
-  .hover-row:hover td {
+
+  .table-row {
+    transition: background-color 0.15s ease;
+  }
+
+  .table-row:hover {
     background-color: #f8fafc;
   }
-  .action-cell {
-    white-space: nowrap;
-    display: flex;
-    gap: 8px;
+
+  .table-row:last-child td {
+    border-bottom: none;
+  }
+
+  /* Attendance Info in Table */
+  .attendance-info {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 12px;
     align-items: center;
   }
-  .mini-btn {
-    display: inline-flex;
+
+  .attendance-icon-wrapper {
+    width: 32px;
+    height: 32px;
+    background: #3b82f6;
+    color: white;
+    border-radius: 8px;
+    display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    border: 1px solid #0f172a;
-    background: #0f172a;
-    color: #fff;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+  }
+
+  .attendance-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .attendance-date {
     font-weight: 600;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .mini-btn.icon-only {
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    justify-content: center;
-  }
-  .mini-btn.disabled {
-    background: #e2e8f0;
-    border-color: #e2e8f0;
-    color: #94a3b8;
-    cursor: not-allowed;
-  }
-  .mini-btn:hover {
-    background: #111827;
-    border-color: #111827;
-  }
-  .mini-btn.mobile {
-    flex: 1;
-    justify-content: center;
-  }
-  .btn-text {
-    display: none;
-  }
-  @media (max-width: 900px) {
-    .mini-btn.mobile .btn-text {
-      display: inline;
-      font-weight: 700;
-      font-size: 12px;
-    }
-    .mini-btn.mobile {
-      height: 38px;
-    }
-  }
-  /* Mobile cards */
-  .entry-card {
-    padding: 14px;
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    background: #ffffff;
-    box-shadow: 0 6px 20px -18px rgba(15, 23, 42, 0.3);
-  }
-  .entry-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-  .date-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: #0f172a;
-    font-weight: 700;
-  }
-  .date-icon {
-    color: #6366f1;
-  }
-  .date-text {
+    color: #1f2937;
     font-size: 0.95rem;
   }
-  .time-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-  .time-box {
-    padding: 12px;
-    border: 1px solid #e2e8f0;
-    border-radius: 14px;
-    background: #f8fafc;
-    text-align: center;
+
+  .user-info-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
-  .intern-grid {
-    display: grid;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-
-  .intern-box {
-    padding: 12px;
-    border: 1px solid #e2e8f0;
-    border-radius: 14px;
-    background: #f8fafc;
-    text-align: center;
-  }
-
-  .intern-name-mobile {
-    font-weight: 600;
-    color: #334155;
-  }
-
-  .intern-box-label {
-    margin: 6px;
-    font-size: 18px;
-    font-weight: 700;
-    padding-bottom: 20px;
-    color: #0f172a;
+  .avatar-small {
+    width: 20px;
+    height: 20px;
+    background: rgb(15 23 42);
+    color: white;
+    border-radius: 50%;
+    display: flex;
     align-items: center;
     justify-content: center;
-  }
-
-  .time-box .label {
-    margin: 0;
-    font-size: 12px;
-    font-weight: 700;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-  .time-value {
-    margin: 6px 0 0 0;
-    font-size: 18px;
-    font-weight: 800;
-    color: #0f172a;
-    letter-spacing: -0.02em;
-  }
-  .mobile-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .font-medium {
-    font-weight: 500;
-  }
-  .text-slate-500 {
-    color: #64748b;
-  }
-
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 12px;
-    border-radius: 99px;
-    font-size: 12px;
     font-weight: 600;
+    font-size: 0.65rem;
+    flex-shrink: 0;
+  }
+
+  .intern-name-small {
+    font-size: 0.8rem;
+    color: #6b7280;
+  }
+
+  /* User Info in Table */
+  .user-info {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .avatar-placeholder {
+    width: 32px;
+    height: 32px;
+    background: rgb(15 23 42);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+    box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
+  }
+
+  .mono {
+    font-family: ui-monospace, monospace;
+    font-size: 0.85rem;
+  }
+
+  .text-center {
+    text-align: center;
+  }
+  .text-right {
+    text-align: right;
+    min-width: 150px;
+    white-space: nowrap;
+  }
+
+  .pagination-pill {
+    min-width: 128px;
+  }
+
+  /* Status Badges */
+  .status-badge {
+    padding: 5px 12px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: capitalize;
+    letter-spacing: 0.03em;
+    display: inline-block;
     border: 1px solid transparent;
   }
-  .equal-badge {
-    min-width: 96px;
-    text-align: center;
-    justify-content: center;
-  }
+
   .bg-emerald-100 {
     background: #ecfdf5;
     border-color: #a7f3d0;
@@ -1391,6 +1207,13 @@
   .text-purple-700 {
     color: #7e22ce;
   }
+  .bg-red-100 {
+    background: #fef2f2;
+    border-color: #fecaca;
+  }
+  .text-red-600 {
+    color: #dc2626;
+  }
   .bg-slate-100 {
     background: #f1f5f9;
     border-color: #e2e8f0;
@@ -1398,66 +1221,265 @@
   .text-slate-600 {
     color: #475569;
   }
-  .bg-red-100 {
-    background: #fef2f2;
-    border-color: #fecaca;
-  }
-  .text-red-700 {
-    color: #b91c1c;
-  }
-
-  .user-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .avatar-mini {
-    width: 28px;
-    height: 28px;
-    background: #0f172a;
-    color: white;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
+  .equal-badge {
+    min-width: 96px;
+    text-align: center;
     justify-content: center;
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .badge-count {
-    background: #f1f5f9;
-    color: #64748b;
-    padding: 4px 10px;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 600;
+    display: inline-flex;
   }
 
   /* States */
-  .empty-state,
   .loading-state {
-    text-align: center;
     padding: 40px;
-    color: #94a3b8;
-    font-style: italic;
+    text-align: center;
+    color: #6b7280;
   }
 
-  /* Utils */
-  .spinner-small {
-    width: 14px;
-    height: 14px;
-    border: 2px solid white;
-    border-top-color: transparent;
+  .empty-state {
+    padding: 40px;
+    text-align: center;
+    color: #9ca3af;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid #e5e7eb;
+    border-top: 3px solid #3b82f6;
     border-radius: 50%;
-    animation: spin 1s infinite linear;
-    display: inline-block;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 12px;
   }
-  .spinner-small.dark {
-    border-color: #64748b;
-    border-top-color: transparent;
-  }
+
   @keyframes spin {
-    to {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
       transform: rotate(360deg);
+    }
+  }
+
+  .btn-icon {
+    width: 42px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+
+  .flex {
+    display: flex;
+  }
+  .gap-2 {
+    gap: 0.5rem;
+  }
+  .gap-3 {
+    gap: 0.75rem;
+  }
+  .items-center {
+    align-items: center;
+  }
+  .border-b {
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  @media (max-width: 900px) {
+    .desktop-only {
+      display: none;
+    }
+    .mobile-list {
+      display: flex;
+      flex-direction: column;
+      /* gap: 12px; */
+    }
+    .entry-card {
+      padding: 14px;
+      /* border-radius: 16px; */
+      border-top: 1px solid #e2e8f0;
+      background: #ffffff;
+      box-shadow: 0 6px 20px -18px rgba(15, 23, 42, 0.3);
+    }
+    .entry-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .date-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #0f172a;
+      font-weight: 700;
+      flex: 1;
+      min-width: 0;
+    }
+    .date-icon {
+      color: #6366f1;
+      flex-shrink: 0;
+    }
+    .date-text {
+      font-size: 0.95rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .head-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .entry-details {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #f1f5f9;
+    }
+
+    .intern-grid {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .intern-box {
+      padding: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .intern-box .avatar-mini {
+      width: 28px;
+      height: 28px;
+      background: #0f172a;
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .intern-box-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #334155;
+    }
+
+    .time-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .time-box {
+      padding: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #f8fafc;
+      text-align: center;
+    }
+    .time-box .label {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .time-value {
+      margin: 6px 0 0 0;
+      font-size: 18px;
+      font-weight: 800;
+      color: #0f172a;
+      letter-spacing: -0.02em;
+    }
+
+    .expand-btn {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: #f8fafc;
+      color: #64748b;
+      border: none;
+      flex-shrink: 0;
+    }
+    .mobile-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .mini-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 9999px;
+      border: 1px solid #0f172a;
+      background: #0f172a;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      flex: 1;
+      justify-content: center;
+    }
+
+    .mini-btn-circle {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 9999px;
+      border: 1px solid #0f172a;
+      background: #0f172a;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      /* flex: 1; */
+      width: 42px;
+      height: 42px;
+      justify-content: center;
+    }
+
+    .mini-btn-circle.disabled {
+      background: #e2e8f0;
+      border-color: #e2e8f0;
+      color: #94a3b8;
+      cursor: not-allowed;
+    }
+
+    .mini-btn .btn-text {
+      display: inline;
+    }
+    .mini-btn.danger {
+      background: #ef4444;
+      border-color: #ef4444;
+    }
+    .mini-btn.disabled {
+      background: #e2e8f0;
+      border-color: #e2e8f0;
+      color: #94a3b8;
+      cursor: not-allowed;
     }
   }
 
@@ -1470,14 +1492,6 @@
     opacity: 0;
     animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
   @keyframes slideUp {
     from {
       opacity: 0;
@@ -1489,21 +1503,16 @@
     }
   }
 
-  /* Action Buttons - Standardized */
-  .btn-icon {
-    background: transparent;
-    border: none;
-    color: #94a3b8;
-    cursor: pointer;
-    padding: 6px;
-    border-radius: 6px;
-    transition: all 0.2s;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+  .mt-4 {
+    margin-top: 1rem;
   }
-  .btn-icon:hover {
-    background: #e2e8f0;
-    color: #0f172a;
+  .pt-4 {
+    padding-top: 1rem;
+  }
+  .border-t {
+    border-top: 1px solid;
+  }
+  .border-slate-100 {
+    border-color: #f1f5f9;
   }
 </style>
