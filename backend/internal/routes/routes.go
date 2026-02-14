@@ -28,6 +28,7 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	profileHandler := handlers.NewProfileHandler(db)
 	passwordResetHandler := handlers.NewPasswordResetHandler(db)
 	dashboardHandler := handlers.NewDashboardHandler(db)
+	agendaHandler := handlers.NewAgendaHandler(db)
 
 	api := router.PathPrefix("/api").Subrouter()
 
@@ -163,11 +164,28 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	// Office Info (all authenticated users can read)
 	protected.HandleFunc("/office-info", settingHandler.GetOfficeInfo).Methods("GET")
 
+	// Agendas
+	protected.HandleFunc("/agendas", agendaHandler.GetAll).Methods("GET")
+	protected.HandleFunc("/agendas", agendaHandler.Create).Methods("POST")
+	protected.HandleFunc("/agendas/{id}", agendaHandler.Update).Methods("PUT")
+	protected.HandleFunc("/agendas/{id}", agendaHandler.Delete).Methods("DELETE")
+
 	// Settings (admin only)
 	settings := protected.PathPrefix("/settings").Subrouter()
 	settings.Use(middleware.RequireRole("admin"))
 	settings.HandleFunc("", settingHandler.GetAll).Methods("GET")
 	settings.HandleFunc("", settingHandler.Update).Methods("POST")
+
+	// Office Locations (admin only)
+	officeHandler := handlers.NewOfficeHandler(db)
+	settings.HandleFunc("/offices", officeHandler.GetAll).Methods("GET")
+	settings.HandleFunc("/offices", officeHandler.Create).Methods("POST")
+	settings.HandleFunc("/offices/active", officeHandler.SetActive).Methods("POST")
+	settings.HandleFunc("/offices/{id}", officeHandler.Delete).Methods("DELETE")
+
+	// Maps routes (admin only)
+	mapsHandler := &handlers.MapsHandler{}
+	settings.HandleFunc("/places/search", mapsHandler.SearchPlaces).Methods("GET")
 
 	// Supervisors (admin only)
 	admin.HandleFunc("/supervisors", supervisorHandler.GetAll).Methods("GET")

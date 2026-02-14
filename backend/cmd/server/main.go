@@ -12,6 +12,7 @@ import (
 	"dsi_interna_sys/internal/config"
 	"dsi_interna_sys/internal/database"
 	"dsi_interna_sys/internal/routes"
+	"dsi_interna_sys/internal/services"
 
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
@@ -37,6 +38,9 @@ func main() {
 	if err := createUploadDirs(cfg); err != nil {
 		log.Fatalf("Failed to create upload directories: %v", err)
 	}
+
+	// Start Scheduler
+	services.StartAgendaScheduler(db)
 
 	// Setup router
 	router := mux.NewRouter()
