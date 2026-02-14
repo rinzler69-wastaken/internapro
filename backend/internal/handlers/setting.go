@@ -42,10 +42,7 @@ func (h *SettingHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		utils.RespondUnauthorized(w, "Unauthorized")
 		return
 	}
-	if middleware.NormalizeRole(claims.Role) == "intern" {
-		utils.RespondForbidden(w, "Only admin or pembimbing can view settings")
-		return
-	}
+	role := middleware.NormalizeRole(claims.Role)
 
 	if err := ensureSettingsTable(h.db); err != nil {
 		log.Printf("settings ensure table failed: %v", err)
@@ -53,8 +50,14 @@ func (h *SettingHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	query := "SELECT id, `key`, `value` FROM settings"
+	var args []interface{}
+	if role == "intern" {
+		query = "SELECT id, `key`, `value` FROM settings WHERE `key` IN ('ALLOW_INTERN_UNSCHEDULED_LOGGING')"
+	}
+
 	// Select only core columns to tolerate older settings table schemas.
-	rows, err := h.db.Query("SELECT id, `key`, `value` FROM settings")
+	rows, err := h.db.Query(query, args...)
 	if err != nil {
 		log.Printf("settings query failed: %v", err)
 		utils.RespondInternalError(w, "Failed to fetch settings: "+err.Error())

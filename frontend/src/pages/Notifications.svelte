@@ -17,16 +17,6 @@
   let searchTimeout;
   let expandedNotifications = $state({});
 
-  // Keep overlay-root click-through state in sync
-  $effect(() => {
-    const root =
-      typeof document !== "undefined"
-        ? document.querySelector("#overlay-root")
-        : null;
-    if (!(root instanceof HTMLElement)) return;
-    root.style.pointerEvents = "none";
-  });
-
   function formatDate(dateStr) {
     if (!dateStr) return "—";
     return new Date(dateStr).toLocaleDateString("id-ID", {

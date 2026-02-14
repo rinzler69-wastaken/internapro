@@ -62,9 +62,12 @@ func (h *ProfileHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if status.Valid {
 		intern.Status = status.String
 	}
+	resp := toUserResponse(user)
+	enrichInternResponse(h.db, &resp)
+
 	if err == sql.ErrNoRows {
 		utils.RespondSuccess(w, "Profile retrieved", map[string]interface{}{
-			"user":   toUserResponse(user),
+			"user":   resp,
 			"intern": intern,
 		})
 		return
@@ -75,7 +78,7 @@ func (h *ProfileHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.RespondSuccess(w, "Profile retrieved", map[string]interface{}{
-		"user":   toUserResponse(user),
+		"user":   resp,
 		"intern": intern,
 	})
 }

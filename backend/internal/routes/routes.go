@@ -37,6 +37,7 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	api.HandleFunc("/auth/login", authHandler.Login).Methods("POST")
 	api.HandleFunc("/auth/google", authHandler.StartGoogleOAuth).Methods("GET")
 	api.HandleFunc("/auth/google/callback", authHandler.HandleGoogleCallback).Methods("GET")
+	api.HandleFunc("/auth/callback", authHandler.HandleGoogleCallback).Methods("GET") // Production alias
 	api.HandleFunc("/auth/password/forgot", passwordResetHandler.RequestReset).Methods("POST")
 	api.HandleFunc("/auth/password/reset", passwordResetHandler.Reset).Methods("POST")
 
@@ -45,6 +46,7 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	api.HandleFunc("/internship/register", internHandler.Register).Methods("POST")
 	api.HandleFunc("/supervisor/register", supervisorHandler.Register).Methods("POST")
 	api.HandleFunc("/supervisors", supervisorHandler.GetAllPublic).Methods("GET")
+	api.HandleFunc("/admins", supervisorHandler.GetAdminsPublic).Methods("GET")
 
 	// Protected
 	protected := api.PathPrefix("").Subrouter()
@@ -170,10 +172,12 @@ func SetupRoutes(router *mux.Router, db *sql.DB) {
 	protected.HandleFunc("/agendas/{id}", agendaHandler.Update).Methods("PUT")
 	protected.HandleFunc("/agendas/{id}", agendaHandler.Delete).Methods("DELETE")
 
+	// Settings
+	protected.HandleFunc("/settings", settingHandler.GetAll).Methods("GET")
+
 	// Settings (admin only)
 	settings := protected.PathPrefix("/settings").Subrouter()
 	settings.Use(middleware.RequireRole("admin"))
-	settings.HandleFunc("", settingHandler.GetAll).Methods("GET")
 	settings.HandleFunc("", settingHandler.Update).Methods("POST")
 
 	// Office Locations (admin only)

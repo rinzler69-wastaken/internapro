@@ -27,20 +27,7 @@
   let expandedTasks = $state({});
   let interns = $state([]);
   let exporting = $state(false);
-
-  // Keep overlay-root click-through state in sync with our modals
-  $effect(() => {
-    const root =
-      typeof document !== "undefined"
-        ? document.querySelector("#overlay-root")
-        : null;
-    if (!(root instanceof HTMLElement)) return;
-    const hasModal = isCreateModalOpen || isEditModalOpen;
-    root.style.pointerEvents = hasModal ? "auto" : "none";
-    if (!hasModal) {
-      root.dataset.portalCount = "0";
-    }
-  });
+  let allowInternLogging = $state(false);
 
   const statusLabels = {
     pending: "Pending",
@@ -161,6 +148,23 @@
     }
   }
 
+  async function fetchSettings() {
+    try {
+      const res = await api.getSettings();
+      const list = res?.data || [];
+      console.log("Tasks.svelte settings list:", list);
+      const flag = list.find(
+        (s) => s.key === "ALLOW_INTERN_UNSCHEDULED_LOGGING",
+      );
+      console.log("Found flag:", flag);
+      allowInternLogging =
+        String(flag?.value).toLowerCase() === "true" || flag?.value === true;
+      console.log("allowInternLogging set to:", allowInternLogging);
+    } catch (err) {
+      console.warn("Failed to fetch settings", err);
+    }
+  }
+
   function goToPreviousPage() {
     currentPage = Math.max(1, currentPage - 1);
     fetchTasks();
@@ -224,14 +228,40 @@
   }
 
   onMount(async () => {
-    await fetchTasks();
-    await fetchInterns();
+    loading = true;
+    await Promise.all([fetchTasks(), fetchInterns(), fetchSettings()]);
+    loading = false;
   });
 
   function getInternAvatar(task) {
     if (task.intern_avatar) return task.intern_avatar;
     const intern = interns.find((i) => i.id === task.intern_id);
     return intern?.avatar;
+  }
+
+  function canAction(task) {
+    const role = auth.user?.role;
+    const userId = auth.user?.id;
+
+    if (!role) return false;
+
+    if (role === "intern") {
+      return !!task.is_unscheduled;
+    }
+
+    if (role === "supervisor" || role === "pembimbing") {
+      return task.assigner_id === userId;
+    }
+
+    if (role === "admin" || role === "super_admin") {
+      const isOwnTask = task.assigner_id === userId;
+      const isSupervisorTask =
+        task.assigner_role === "supervisor" ||
+        task.assigner_role === "pembimbing";
+      return isOwnTask || isSupervisorTask;
+    }
+
+    return false;
   }
 </script>
 
@@ -245,7 +275,7 @@
   <div class="card table-card animate-slide-up" style="animation-delay: 0.1s;">
     <div class="card-header-row border-b">
       <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
-        {#if auth.user?.role !== "intern"}
+        {#if auth.user?.role !== "intern" || allowInternLogging}
           <button
             class="cursor-pointer flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-sm flex items-center justify-center gap-2"
             onclick={() => (isCreateModalOpen = true)}
@@ -269,6 +299,9 @@
             >
             <span>Buat Tugas</span>
           </button>
+        {/if}
+
+        {#if auth.user?.role !== "intern"}
           <button
             class="cursor-pointer flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
             onclick={exportTasks}
@@ -464,7 +497,11 @@
           <thead>
             <tr>
               <th>Judul</th>
-              {#if auth.user?.role !== "intern"}<th>Intern</th>{/if}
+              {#if auth.user?.role !== "intern"}
+                <th>Intern</th>
+              {:else}
+                <th>Assigner</th>
+              {/if}
               <th>Status</th>
               <th>Prioritas</th>
               <th>Deadline</th>
@@ -522,6 +559,26 @@
                       <span>{task.intern_name || "-"}</span>
                     </div>
                   </td>
+                {:else}
+                  <td>
+                    <div class="user-info">
+                      <div class="avatar-placeholder assigner">
+                        {(task.assigner_name || task.assigned_by_name)?.charAt(
+                          0,
+                        ) || "A"}
+                      </div>
+                      <div class="flex flex-col">
+                        <span class="text-sm font-medium">
+                          {task.assigner_name || task.assigned_by_name || "-"}
+                        </span>
+                        {#if task.custom_assigner_name}
+                          <span class="text-[10px] text-slate-400 leading-none">
+                            {task.custom_assigner_name}
+                          </span>
+                        {/if}
+                      </div>
+                    </div>
+                  </td>
                 {/if}
                 <td class="text-center">
                   <span
@@ -563,15 +620,14 @@
                       <circle cx="12" cy="12" r="3"></circle>
                     </svg>
                   </button>
-                  {#if auth.user?.role !== "intern"}
+                  {#if canAction(task)}
                     <button
                       class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100"
-                      onclick={(e) => {
-                        e.stopPropagation();
+                      onclick={() => {
                         editingTaskId = task.id;
                         isEditModalOpen = true;
                       }}
-                      title="Edit Data"
+                      title="Edit"
                     >
                       <svg
                         width="18"
@@ -590,7 +646,7 @@
                       </svg>
                     </button>
                     <button
-                      class="btn-icon text-slate-600 hover:text-slate-700 bg-slate-50 hover:bg-slate-100"
+                      class="btn-icon text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100"
                       onclick={() => handleDelete(task.id, task.title)}
                       title="Hapus"
                     >
@@ -683,6 +739,28 @@
                       >
                     </div>
                   </div>
+                {:else}
+                  <div class="intern-grid">
+                    <div class="intern-box">
+                      <div class="avatar-mini assigner-mini">
+                        {(task.assigner_name || task.assigned_by_name)?.charAt(
+                          0,
+                        ) || "A"}
+                      </div>
+                      <div class="flex flex-col ml-2">
+                        <span class="intern-box-label font-medium"
+                          >{task.assigner_name ||
+                            task.assigned_by_name ||
+                            "-"}</span
+                        >
+                        {#if task.custom_assigner_name}
+                          <span class="text-[10px] text-slate-400 leading-none">
+                            {task.custom_assigner_name}
+                          </span>
+                        {/if}
+                      </div>
+                    </div>
+                  </div>
                 {/if}
 
                 <div class="details-grid">
@@ -725,7 +803,7 @@
                     <span class="material-symbols-outlined">visibility</span>
                     <span class="btn-text">Detail</span>
                   </button>
-                  {#if auth.user?.role !== "intern"}
+                  {#if auth.user?.role !== "intern" || task.is_unscheduled}
                     <button
                       class="mini-btn-circle mobile"
                       onclick={(e) => {

@@ -637,7 +637,7 @@
                 r="4"
               /><polyline points="17 11 19 13 23 9" /></svg
             >
-            Tinjau Kehadiran
+            Tinjau Presensi
           {:else}
             <svg
               width="16"

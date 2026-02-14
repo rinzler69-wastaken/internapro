@@ -64,13 +64,16 @@ type LoginResponse struct {
 
 // UserResponse is a safe JSON shape for frontend consumption
 type UserResponse struct {
-	ID           int64     `json:"id"`
-	Name         string    `json:"name"`
-	Email        string    `json:"email"`
-	Role         string    `json:"role"`
-	Avatar       string    `json:"avatar,omitempty"`
-	Is2FAEnabled bool      `json:"is_2fa_enabled"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID             int64     `json:"id"`
+	Name           string    `json:"name"`
+	Email          string    `json:"email"`
+	Role           string    `json:"role"`
+	Avatar         string    `json:"avatar,omitempty"`
+	Is2FAEnabled   bool      `json:"is_2fa_enabled"`
+	CreatedAt      time.Time `json:"created_at"`
+	InternID       int64     `json:"intern_id,omitempty"`       // For interns
+	SupervisorID   int64     `json:"supervisor_id,omitempty"`   // For interns
+	SupervisorName string    `json:"supervisor_name,omitempty"` // For interns
 }
 
 // Setup2FAResponse represents 2FA setup response
@@ -253,8 +256,20 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. Block accounts that are not approved/active (intern & pembimbing/supervisor)
+	// Normalize role, auto-upgrade new_user if intern data exists
 	role := strings.ToLower(strings.TrimSpace(user.Role))
+	if role == "new_user" {
+		var status string
+		err := h.db.QueryRow("SELECT status FROM interns WHERE user_id = ? LIMIT 1", user.ID).Scan(&status)
+		if err == nil {
+			// Upgrade role in DB and in-memory; status checks below will gate access
+			role = "intern"
+			user.Role = "intern"
+			_, _ = h.db.Exec("UPDATE users SET role = 'intern' WHERE id = ?", user.ID)
+		}
+	}
+
+	// 2. Block accounts that are not approved/active (intern & pembimbing/supervisor)
 	if role == "intern" {
 		var status string
 		err := h.db.QueryRow("SELECT status FROM interns WHERE user_id = ? LIMIT 1", user.ID).Scan(&status)
@@ -305,9 +320,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// If 2FA is NOT enabled, we mark SetupRequired as true
 	setupRequired := !user.Is2FAEnabled
 
+	resp := toUserResponse(user)
+	enrichInternResponse(h.db, &resp)
+
 	utils.RespondSuccess(w, "Login successful", LoginResponse{
 		Token:         token,
-		User:          toUserResponse(user),
+		User:          resp,
 		Require2FA:    false,
 		SetupRequired: setupRequired, // <--- SEND THE FLAG
 	})
@@ -474,7 +492,10 @@ func (h *AuthHandler) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.RespondSuccess(w, "User retrieved successfully", toUserResponse(user))
+	resp := toUserResponse(user)
+	enrichInternResponse(h.db, &resp)
+
+	utils.RespondSuccess(w, "User retrieved successfully", resp)
 }
 
 // Logout handles logout (mainly client-side token removal)
@@ -531,4 +552,19 @@ func prependUploadPath(path string) string {
 		return "/" + clean
 	}
 	return "/uploads/" + clean
+}
+
+func enrichInternResponse(db *sql.DB, resp *UserResponse) {
+	if resp.Role == "intern" {
+		var internID, supID int64
+		var supName string
+		_ = db.QueryRow(`
+			SELECT i.id, i.supervisor_id, u.name 
+			FROM interns i 
+			LEFT JOIN users u ON i.supervisor_id = u.id 
+			WHERE i.user_id = ?`, resp.ID).Scan(&internID, &supID, &supName)
+		resp.InternID = internID
+		resp.SupervisorID = supID
+		resp.SupervisorName = supName
+	}
 }

@@ -15,6 +15,7 @@
     let deadlineTime = $state("");
     let submissionMethod = $state("links");
     let internId = $state(""); // Single intern for edit
+    let isUnscheduled = $state(false);
 
     let interns = $state([]);
     let loading = $state(false);
@@ -41,6 +42,7 @@
             priority = data.priority || "medium";
             submissionMethod = data.submission_method || "links";
             internId = data.intern_id || "";
+            isUnscheduled = !!data.is_unscheduled;
 
             // Handle Dates
             if (data.start_date) startDate = data.start_date.split("T")[0];
@@ -251,9 +253,12 @@
                                 >
                                 <div class="select-wrapper">
                                     <select
-                                        class="input-field select"
+                                        class="input-field select {isUnscheduled
+                                            ? 'opacity-70 cursor-not-allowed bg-slate-50'
+                                            : ''}"
                                         bind:value={internId}
                                         id="edit_intern"
+                                        disabled={isUnscheduled}
                                     >
                                         <option value=""
                                             >-- Pilih Intern --</option
@@ -264,12 +269,46 @@
                                             >
                                         {/each}
                                     </select>
-                                    <div class="select-arrow">▼</div>
+                                    {#if !isUnscheduled}
+                                        <div class="select-arrow">▼</div>
+                                    {/if}
                                 </div>
-                                <p class="text-xs text-slate-500 mt-2">
-                                    Mengubah penerima tugas akan memindahkan
-                                    tugas ini ke intern yang dipilih.
-                                </p>
+                                {#if isUnscheduled}
+                                    <p
+                                        class="text-xs text-amber-600 mt-2 font-medium flex items-center gap-1"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="12"
+                                            height="12"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            ><circle cx="12" cy="12" r="10"
+                                            ></circle><line
+                                                x1="12"
+                                                y1="16"
+                                                x2="12"
+                                                y2="12"
+                                            ></line><line
+                                                x1="12"
+                                                y1="8"
+                                                x2="12.01"
+                                                y2="8"
+                                            ></line></svg
+                                        >
+                                        Pelapor tugas (Self-Reporting) tidak dapat
+                                        diubah.
+                                    </p>
+                                {:else}
+                                    <p class="text-xs text-slate-500 mt-2">
+                                        Mengubah penerima tugas akan memindahkan
+                                        tugas ini ke intern yang dipilih.
+                                    </p>
+                                {/if}
                             </div>
                         </div>
                     {/if}

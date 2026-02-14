@@ -25,20 +25,6 @@
   let searchTimeout;
   let expandedReports = $state({});
 
-  // Keep overlay-root click-through state in sync with our modals
-  $effect(() => {
-    const root =
-      typeof document !== "undefined"
-        ? document.querySelector("#overlay-root")
-        : null;
-    if (!(root instanceof HTMLElement)) return;
-    const hasModal = isCreateModalOpen || isEditModalOpen;
-    root.style.pointerEvents = hasModal ? "auto" : "none";
-    if (!hasModal) {
-      root.dataset.portalCount = "0";
-    }
-  });
-
   // Helpers UI
   function getTypeColor(type) {
     switch (type) {

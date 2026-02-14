@@ -81,6 +81,9 @@ func (h *ReportHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		}
 		where = append(where, "r.intern_id = ?")
 		args = append(args, internID)
+	} else if role == "pembimbing" {
+		where = append(where, "i.supervisor_id = ?")
+		args = append(args, claims.UserID)
 	} else if filterIntern != "" {
 		if id, err := strconv.ParseInt(filterIntern, 10, 64); err == nil {
 			where = append(where, "r.intern_id = ?")
@@ -491,18 +494,32 @@ func (h *ReportHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ReportHandler) AddFeedback(w http.ResponseWriter, r *http.Request) {
-	// claims, ok := middleware.GetUserFromContext(r.Context())
-	// if !ok {
-	// 	utils.RespondUnauthorized(w, "Unauthorized")
-	// 	return
-	// }
-	// if normalizeRole(claims.Role) == "intern" {
-	// 	utils.RespondForbidden(w, "Only admin or pembimbing can add feedback")
-	// 	return
-	// }
-
 	vars := mux.Vars(r)
 	id, _ := strconv.ParseInt(vars["id"], 10, 64)
+
+	claims, ok := middleware.GetUserFromContext(r.Context())
+	if !ok {
+		utils.RespondUnauthorized(w, "Unauthorized")
+		return
+	}
+	role := normalizeRole(claims.Role)
+	if role == "intern" {
+		utils.RespondForbidden(w, "Only admin or pembimbing can add feedback")
+		return
+	}
+
+	if role == "pembimbing" {
+		var reportInternID int64
+		err := h.db.QueryRow("SELECT intern_id FROM reports WHERE id = ?", id).Scan(&reportInternID)
+		if err == nil {
+			var supervisorID sql.NullInt64
+			h.db.QueryRow("SELECT supervisor_id FROM interns WHERE id = ?", reportInternID).Scan(&supervisorID)
+			if !supervisorID.Valid || supervisorID.Int64 != claims.UserID {
+				utils.RespondForbidden(w, "You can only give feedback to your assigned interns")
+				return
+			}
+		}
+	}
 
 	var payload struct {
 		Feedback string `json:"feedback"`
@@ -552,6 +569,13 @@ func (h *ReportHandler) GetInternReport(w http.ResponseWriter, r *http.Request) 
 		var myID int64
 		if err := h.db.QueryRow("SELECT id FROM interns WHERE user_id = ?", claims.UserID).Scan(&myID); err != nil || myID != internID {
 			utils.RespondForbidden(w, "You do not have access to this report")
+			return
+		}
+	} else if normalizeRole(claims.Role) == "pembimbing" {
+		var supervisorID sql.NullInt64
+		h.db.QueryRow("SELECT supervisor_id FROM interns WHERE id = ?", internID).Scan(&supervisorID)
+		if !supervisorID.Valid || supervisorID.Int64 != claims.UserID {
+			utils.RespondForbidden(w, "You do not have access to this intern's report")
 			return
 		}
 	}

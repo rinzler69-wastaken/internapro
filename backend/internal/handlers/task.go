@@ -24,15 +24,17 @@ func NewTaskHandler(db *sql.DB) *TaskHandler {
 }
 
 type createTaskRequest struct {
-	Title            string  `json:"title"`
-	Description      string  `json:"description"`
-	SubmissionMethod string  `json:"submission_method"` // links, files, both
-	Priority         string  `json:"priority"`          // low, medium, high
-	StartDate        string  `json:"start_date"`        // YYYY-MM-DD
-	Deadline         string  `json:"deadline"`          // YYYY-MM-DD
-	DeadlineTime     string  `json:"deadline_time"`     // HH:MM
-	AssignTo         string  `json:"assign_to"`         // all, selected
-	InternIDs        []int64 `json:"intern_ids"`
+	Title              string  `json:"title"`
+	Description        string  `json:"description"`
+	SubmissionMethod   string  `json:"submission_method"` // links, files, both
+	Priority           string  `json:"priority"`          // low, medium, high
+	StartDate          string  `json:"start_date"`        // YYYY-MM-DD
+	Deadline           string  `json:"deadline"`          // YYYY-MM-DD
+	DeadlineTime       string  `json:"deadline_time"`     // HH:MM
+	AssignTo           string  `json:"assign_to"`         // all, selected
+	InternIDs          []int64 `json:"intern_ids"`
+	AssignerID         int64   `json:"assigner_id"`
+	CustomAssignerName string  `json:"custom_assigner_name"`
 }
 
 type updateTaskRequest struct {
@@ -100,10 +102,10 @@ func (h *TaskHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		args = append(args, internID)
 		where = append(where, "t.status != 'scheduled'")
 	} else {
-		// Supervisors/pembimbing only see tasks for their own interns
-		if role == "pembimbing" {
-			where = append(where, "(i.supervisor_id = ? OR t.assigned_by = ?)")
-			args = append(args, claims.UserID, claims.UserID)
+		// Supervisors/pembimbing only see tasks for their own interns OR tasks they assigned
+		if claims.Role == "pembimbing" || claims.Role == "supervisor" {
+			where = append(where, "(i.supervisor_id = ? OR t.assigned_by = ? OR t.assigner_id = ?)")
+			args = append(args, claims.UserID, claims.UserID, claims.UserID)
 		}
 		if internFilter != "" {
 			if id, err := strconv.ParseInt(internFilter, 10, 64); err == nil {
@@ -131,6 +133,7 @@ func (h *TaskHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN interns i ON t.intern_id = i.id
 		LEFT JOIN users iu ON i.user_id = iu.id
 		LEFT JOIN users au ON t.assigned_by = au.id
+		LEFT JOIN users su ON t.assigner_id = su.id
 	`
 
 	whereClause := ""
@@ -149,7 +152,7 @@ func (h *TaskHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.task_assignment_id, t.intern_id, t.assigned_by, t.title, t.description, t.submission_method, t.priority, t.status,
 		       t.start_date, t.deadline, t.deadline_time, t.started_at, t.submitted_at, t.completed_at, t.approved_at,
 		       t.is_late, t.submission_notes, t.submission_links, t.submission_file, t.score, t.admin_feedback, t.created_at, t.updated_at,
-		       iu.name, au.name
+		       t.is_unscheduled, COALESCE(t.assigner_id, t.assigned_by) as assigner_id, t.custom_assigner_name, iu.name, au.name, su.name, su.role
 	` + baseFrom + " " + whereClause + " ORDER BY t.created_at DESC LIMIT ? OFFSET ?"
 
 	args = append(args, limit, offset)
@@ -187,11 +190,12 @@ func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.task_assignment_id, t.intern_id, t.assigned_by, t.title, t.description, t.submission_method, t.priority, t.status,
 		       t.start_date, t.deadline, t.deadline_time, t.started_at, t.submitted_at, t.completed_at, t.approved_at,
 		       t.is_late, t.submission_notes, t.submission_links, t.submission_file, t.score, t.admin_feedback, t.created_at, t.updated_at,
-		       iu.name, au.name
+		       t.is_unscheduled, COALESCE(t.assigner_id, t.assigned_by) as assigner_id, t.custom_assigner_name, iu.name, au.name, su.name, su.role
 		FROM tasks t
 		LEFT JOIN interns i ON t.intern_id = i.id
 		LEFT JOIN users iu ON i.user_id = iu.id
 		LEFT JOIN users au ON t.assigned_by = au.id
+		LEFT JOIN users su ON COALESCE(t.assigner_id, t.assigned_by) = su.id
 		WHERE t.id = ?
 	`
 
@@ -234,10 +238,16 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only admin/pembimbing can create tasks
-	if normalizeRole(claims.Role) == "intern" {
-		utils.RespondForbidden(w, "Only admin or pembimbing can assign tasks")
-		return
+	role := normalizeRole(claims.Role)
+	isIntern := role == "intern"
+
+	if isIntern {
+		var allowInternLogging string
+		err := h.db.QueryRow("SELECT value FROM settings WHERE `key` = 'ALLOW_INTERN_UNSCHEDULED_LOGGING'").Scan(&allowInternLogging)
+		if err != nil || allowInternLogging != "true" {
+			utils.RespondForbidden(w, "Pencatatan tugas oleh intern sedang dinonaktifkan")
+			return
+		}
 	}
 
 	var req createTaskRequest
@@ -302,7 +312,15 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	var interns []internRow
 
-	if req.AssignTo == "all" {
+	if isIntern {
+		// Intern can only assign to themselves
+		id, err := h.getInternIDForUser(claims.UserID)
+		if err != nil {
+			utils.RespondNotFound(w, "Intern profile not found")
+			return
+		}
+		interns = append(interns, internRow{ID: id, UserID: claims.UserID})
+	} else if req.AssignTo == "all" {
 		rows, err := h.db.Query("SELECT id, user_id FROM interns WHERE status = 'active'")
 		if err != nil {
 			utils.RespondInternalError(w, "Failed to fetch interns")
@@ -371,10 +389,21 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Calculate assignerID for the task record
+		var dbAssignerID sql.NullInt64
+		if isIntern {
+			if req.AssignerID > 0 {
+				dbAssignerID = sql.NullInt64{Int64: req.AssignerID, Valid: true}
+			}
+		} else {
+			dbAssignerID = sql.NullInt64{Int64: claims.UserID, Valid: true}
+		}
+
 		taskRes, err := tx.Exec(
-			`INSERT INTO tasks (task_assignment_id, title, description, submission_method, intern_id, assigned_by, priority, status, start_date, deadline, deadline_time)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO tasks (task_assignment_id, title, description, submission_method, intern_id, assigned_by, priority, status, start_date, deadline, deadline_time, is_unscheduled, assigner_id, custom_assigner_name)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			assignmentID, req.Title, nullIfEmpty(req.Description), req.SubmissionMethod, it.ID, claims.UserID, req.Priority, initialStatus, startDate, deadline, deadlineTime,
+			isIntern, dbAssignerID, nullIfEmpty(req.CustomAssignerName),
 		)
 		if err != nil {
 			utils.RespondInternalError(w, "Failed to create tasks")
@@ -383,7 +412,11 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 		taskID, _ := taskRes.LastInsertId()
 
-		if !isScheduled {
+		// For intern reporting, send notification to the assigner
+		if isIntern && req.AssignerID > 0 {
+			_ = createNotification(h.db, req.AssignerID, models.NotificationTaskAssigned, "Laporan Tugas Baru: "+req.Title,
+				"Intern telah melaporkan tugas baru untuk di-review.", "/tasks/"+strconv.FormatInt(taskID, 10), map[string]interface{}{"task_id": taskID})
+		} else if !isScheduled {
 			_ = createNotification(h.db, it.UserID, models.NotificationTaskAssigned, "Tugas Baru: "+req.Title,
 				"Anda mendapat tugas baru. Silakan cek detail tugas Anda.", "/tasks/"+strconv.FormatInt(taskID, 10), map[string]interface{}{"task_id": taskID})
 		}
@@ -407,29 +440,31 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		utils.RespondUnauthorized(w, "Unauthorized")
 		return
 	}
-	if normalizeRole(claims.Role) == "intern" {
-		utils.RespondForbidden(w, "Only admin or pembimbing can update tasks")
-		return
-	}
-
 	vars := mux.Vars(r)
 	taskID, _ := strconv.ParseInt(vars["id"], 10, 64)
 
-	var req updateTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.RespondBadRequest(w, "Invalid request body")
-		return
-	}
-
-	// Load current task for status transitions
+	// Load task for permission checks
+	// We need assigner_id AND assigner's role
 	var current struct {
-		Status       string
-		StartedAt    sql.NullTime
-		Deadline     sql.NullTime
-		DeadlineTime sql.NullString
+		Status        string
+		StartedAt     sql.NullTime
+		Deadline      sql.NullTime
+		DeadlineTime  sql.NullString
+		IsUnscheduled bool
+		InternID      int64
+		AssignerID    sql.NullInt64
+		AssignerRole  sql.NullString
 	}
-	err := h.db.QueryRow("SELECT status, started_at, deadline, deadline_time FROM tasks WHERE id = ?", taskID).
-		Scan(&current.Status, &current.StartedAt, &current.Deadline, &current.DeadlineTime)
+	// Join users table to get assigner's role
+	query := `
+		SELECT t.status, t.started_at, t.deadline, t.deadline_time, t.is_unscheduled, t.intern_id, COALESCE(t.assigner_id, t.assigned_by) as assigner_id, u.role
+		FROM tasks t
+		LEFT JOIN users u ON COALESCE(t.assigner_id, t.assigned_by) = u.id
+		WHERE t.id = ?
+	`
+	err := h.db.QueryRow(query, taskID).
+		Scan(&current.Status, &current.StartedAt, &current.Deadline, &current.DeadlineTime, &current.IsUnscheduled, &current.InternID, &current.AssignerID, &current.AssignerRole)
+
 	if err == sql.ErrNoRows {
 		utils.RespondNotFound(w, "Task not found")
 		return
@@ -438,6 +473,63 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		utils.RespondInternalError(w, "Database error")
 		return
 	}
+
+	role := normalizeRole(claims.Role)
+	assignerID := int64OrZero(current.AssignerID)
+	assignerRole := ""
+	if current.AssignerRole.Valid {
+		assignerRole = normalizeRole(current.AssignerRole.String)
+	}
+
+	// Permission Checks
+	if role == "intern" {
+		// Interns: Only self-reported tasks they own
+		ownInternID, _ := h.getInternIDForUser(claims.UserID)
+		if !current.IsUnscheduled || current.InternID != ownInternID {
+			utils.RespondForbidden(w, "You can only update your own self-reported tasks")
+			return
+		}
+	} else if role == "supervisor" || role == "pembimbing" {
+		// Supervisors: Only tasks they assigned
+		// (IsUnscheduled tasks assigned to them count as assigned by them in this logic?
+		// No, IsUnscheduled tasks have them as AssignerID if they are the target)
+		if assignerID != claims.UserID {
+			utils.RespondForbidden(w, "You can only update tasks you assigned")
+			return
+		}
+	} else if role == "admin" || role == "super_admin" {
+		// Admins: Own tasks OR Supervisor tasks
+		// Allowed if: Assigner is Self OR Assigner is Supervisor
+		// Denied if: Assigner is another Admin (unless it's self) ??
+		// Rule: "admin can edit... its own... but not supervisors [created by superadmin?]" -> "supervisors can... not admins"
+		// Rule: "admins can still edit and delete supervisor-created task entries"
+
+		isOwnTask := assignerID == claims.UserID
+		isSupervisorTask := assignerRole == "supervisor" || assignerRole == "pembimbing"
+
+		if !isOwnTask && !isSupervisorTask {
+			// This means the task was created by another Admin (or potentially System/Unknown, but realistically another Admin)
+			// And we are an Admin.
+			// "admin can edit... its own... assigned to any intern" -> Implies they CANNOT edit other admins' tasks?
+			// The prompt says "supervisors... not admins". And "admins can... supervisor-created".
+			// It doesn't explicitly ban Admin vs Admin, but "its own" suggests restrictiveness.
+			// However, usually Admins have broad power.
+			// Let's stick to: Own OR Supervisor-created.
+			// If AssignerRole is 'admin' and AssignerID != Claims.UserID -> Forbidden.
+
+			utils.RespondForbidden(w, "You can only edit your own tasks or supervisor tasks")
+			return
+		}
+	}
+
+	var req updateTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.RespondBadRequest(w, "Invalid request body")
+		return
+	}
+
+	// Interns cannot update status to 'completed' via this endpoint (usually handled by Submit/MarkComplete)
+	// But let's allow common updates for now based on previous logic
 
 	updates := []string{}
 	args := []interface{}{}
@@ -507,7 +599,7 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	args = append(args, taskID)
-	query := "UPDATE tasks SET " + strings.Join(updates, ", ") + " WHERE id = ?"
+	query = "UPDATE tasks SET " + strings.Join(updates, ", ") + " WHERE id = ?"
 	if _, err := h.db.Exec(query, args...); err != nil {
 		utils.RespondInternalError(w, "Failed to update task")
 		return
@@ -522,13 +614,63 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		utils.RespondUnauthorized(w, "Unauthorized")
 		return
 	}
-	if normalizeRole(claims.Role) == "intern" {
-		utils.RespondForbidden(w, "Only admin or pembimbing can delete tasks")
-		return
-	}
 
 	vars := mux.Vars(r)
 	taskID, _ := strconv.ParseInt(vars["id"], 10, 64)
+
+	// Load task for permission check
+	var current struct {
+		IsUnscheduled bool
+		InternID      int64
+		AssignerID    sql.NullInt64
+		AssignerRole  sql.NullString
+	}
+	// Join users table to get assigner's role
+	query := `
+		SELECT t.is_unscheduled, t.intern_id, COALESCE(t.assigner_id, t.assigned_by) as assigner_id, u.role
+		FROM tasks t
+		LEFT JOIN users u ON COALESCE(t.assigner_id, t.assigned_by) = u.id
+		WHERE t.id = ?
+	`
+	err := h.db.QueryRow(query, taskID).
+		Scan(&current.IsUnscheduled, &current.InternID, &current.AssignerID, &current.AssignerRole)
+
+	if err == sql.ErrNoRows {
+		utils.RespondNotFound(w, "Task not found")
+		return
+	}
+	if err != nil {
+		utils.RespondInternalError(w, "Database error")
+		return
+	}
+
+	role := normalizeRole(claims.Role)
+	assignerID := int64OrZero(current.AssignerID)
+	assignerRole := ""
+	if current.AssignerRole.Valid {
+		assignerRole = normalizeRole(current.AssignerRole.String)
+	}
+
+	if role == "intern" {
+		ownInternID, _ := h.getInternIDForUser(claims.UserID)
+		if !current.IsUnscheduled || current.InternID != ownInternID {
+			utils.RespondForbidden(w, "You can only delete your own self-reported tasks")
+			return
+		}
+	} else if role == "supervisor" || role == "pembimbing" {
+		if assignerID != claims.UserID {
+			utils.RespondForbidden(w, "You can only delete tasks you assigned")
+			return
+		}
+	} else if role == "admin" || role == "super_admin" {
+		isOwnTask := assignerID == claims.UserID
+		isSupervisorTask := assignerRole == "supervisor" || assignerRole == "pembimbing"
+
+		if !isOwnTask && !isSupervisorTask {
+			utils.RespondForbidden(w, "You can only delete your own tasks or supervisor tasks")
+			return
+		}
+	}
 
 	if _, err := h.db.Exec("DELETE FROM tasks WHERE id = ?", taskID); err != nil {
 		utils.RespondInternalError(w, "Failed to delete task")
@@ -768,17 +910,27 @@ func (h *TaskHandler) Review(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var internUserID int64
+	var assignerID sql.NullInt64
 	err := h.db.QueryRow(
-		`SELECT i.user_id FROM tasks t
+		`SELECT i.user_id, t.assigner_id FROM tasks t
 		 LEFT JOIN interns i ON t.intern_id = i.id
 		 WHERE t.id = ?`, taskID,
-	).Scan(&internUserID)
+	).Scan(&internUserID, &assignerID)
 	if err == sql.ErrNoRows {
 		utils.RespondNotFound(w, "Task not found")
 		return
 	}
 	if err != nil {
 		utils.RespondInternalError(w, "Database error")
+		return
+	}
+
+	rawRole := strings.ToLower(claims.Role)
+	isAdmin := rawRole == "admin" || rawRole == "super_admin"
+	isAssigner := assignerID.Valid && assignerID.Int64 == claims.UserID
+
+	if !isAdmin && !isAssigner {
+		utils.RespondForbidden(w, "Only the assigned admin or a super-administrator can review this task")
 		return
 	}
 
@@ -1059,11 +1211,12 @@ func (h *TaskHandler) GetAssignmentByID(w http.ResponseWriter, r *http.Request) 
 		`SELECT t.id, t.task_assignment_id, t.intern_id, t.assigned_by, t.title, t.description, t.submission_method, t.priority, t.status,
 		        t.start_date, t.deadline, t.deadline_time, t.started_at, t.submitted_at, t.completed_at, t.approved_at,
 		        t.is_late, t.submission_notes, t.submission_links, t.submission_file, t.score, t.admin_feedback, t.created_at, t.updated_at,
-		        iu.name, au.name
+		        iu.name, au.name, su.name
 		 FROM tasks t
 		 LEFT JOIN interns i ON t.intern_id = i.id
 		 LEFT JOIN users iu ON i.user_id = iu.id
 		 LEFT JOIN users au ON t.assigned_by = au.id
+		 LEFT JOIN users su ON t.assigner_id = su.id
 		 WHERE t.task_assignment_id = ?`, assignmentID,
 	)
 	if err != nil {
@@ -1114,12 +1267,17 @@ func scanTask(scanner sqlScanner) (models.Task, error) {
 	var submissionFile sql.NullString
 	var internName sql.NullString
 	var assignedByName sql.NullString
+	var assignerID sql.NullInt64
+	var customAssignerName sql.NullString
+
+	var assignerName sql.NullString
+	var assignerRole sql.NullString
 
 	if err := scanner.Scan(
 		&t.ID, &taskAssignmentID, &internID, &t.AssignedBy, &t.Title, &description, &submissionMethod, &t.Priority, &t.Status,
 		&startDate, &deadline, &deadlineTime, &startedAt, &submittedAt, &completedAt, &approvedAt,
 		&t.IsLate, &submissionNotes, &submissionLinks, &submissionFile, &score, &adminFeedback, &t.CreatedAt, &t.UpdatedAt,
-		&internName, &assignedByName,
+		&t.IsUnscheduled, &assignerID, &customAssignerName, &internName, &assignedByName, &assignerName, &assignerRole,
 	); err != nil {
 		return t, err
 	}
@@ -1139,6 +1297,8 @@ func scanTask(scanner sqlScanner) (models.Task, error) {
 	t.Score = ptrIntFromNull(score)
 	t.AdminFeedback = ptrStringFromNull(adminFeedback)
 	t.SubmissionFile = ptrStringFromNull(submissionFile)
+	t.AssignerID = ptrInt64FromNull(assignerID)
+	t.CustomAssignerName = ptrStringFromNull(customAssignerName)
 
 	if submissionLinks.Valid {
 		var links []models.SubmissionLink
@@ -1150,6 +1310,12 @@ func scanTask(scanner sqlScanner) (models.Task, error) {
 	}
 	if assignedByName.Valid {
 		t.AssignedByName = assignedByName.String
+	}
+	if assignerName.Valid {
+		t.AssignerName = assignerName.String
+	}
+	if assignerRole.Valid {
+		t.AssignerRole = assignerRole.String
 	}
 
 	return t, nil

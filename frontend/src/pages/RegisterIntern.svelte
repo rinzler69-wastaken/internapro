@@ -29,7 +29,12 @@
 
   onMount(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("error") === "google_unregistered") {
+    const oauthParam = params.get("oauth");
+    if (
+      params.get("error") === "google_unregistered" ||
+      oauthParam === "google_unregistered" ||
+      oauthParam === "google"
+    ) {
       isGoogleError = true;
     }
     const emailParam = params.get("email");

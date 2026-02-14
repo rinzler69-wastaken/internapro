@@ -200,6 +200,9 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return request(`/admin/supervisors${query ? `?${query}` : ''}`);
   },
+  async getSupervisorsPublic() {
+    return request('/supervisors');
+  },
   async createSupervisor(payload) {
     return request('/admin/supervisors', { method: 'POST', body: JSON.stringify(payload) });
   },
@@ -214,6 +217,12 @@ export const api = {
   },
   async rejectSupervisor(id) {
     return request(`/admin/supervisors/${id}/reject`, { method: 'POST' });
+  },
+  async getAdmins() {
+    return request('/admins');
+  },
+  async getAdminsPublic() {
+    return request('/admins');
   },
 
   // ==========================================

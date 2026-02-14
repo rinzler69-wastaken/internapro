@@ -31,7 +31,7 @@ func ensureOfficeTable(db *sql.DB) error {
 			"name VARCHAR(255) NOT NULL," +
 			"latitude DECIMAL(10, 8) NOT NULL," +
 			"longitude DECIMAL(11, 8) NOT NULL," +
-			"radius_meters INT DEFAULT 100," +
+			"radius_meters INT DEFAULT 1000," +
 			"address TEXT," +
 			"created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
 			"updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" +
@@ -63,6 +63,11 @@ func (h *OfficeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		utils.RespondBadRequest(w, "Invalid request body")
 		return
+	}
+
+	// Default to 1000 if not set or 0
+	if payload.RadiusMeters == 0 {
+		payload.RadiusMeters = 1000
 	}
 
 	res, err := h.db.Exec(
@@ -162,22 +167,55 @@ func (h *OfficeHandler) SetActive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify ID exists
-	var exists bool
-	err := h.db.QueryRow("SELECT EXISTS(SELECT 1 FROM office_locations WHERE id = ?)", payload.ID).Scan(&exists)
-	if err != nil || !exists {
+	// Verify ID exists and get details
+	var name, address string
+	var lat, lng float64
+	var radius int
+	err := h.db.QueryRow("SELECT name, latitude, longitude, radius_meters, address FROM office_locations WHERE id = ?", payload.ID).
+		Scan(&name, &lat, &lng, &radius, &address)
+	if err != nil {
 		utils.RespondBadRequest(w, "Location not found or database error")
 		return
 	}
 
+	// Auto-upgrade legacy default (100) to new default (1000)
+	if radius == 100 {
+		radius = 1000
+		// Update the office record permanently
+		h.db.Exec("UPDATE office_locations SET radius_meters = 1000 WHERE id = ?", payload.ID)
+	}
+
 	val := fmt.Sprintf("%d", payload.ID)
-	// Update settings
-	_, err = h.db.Exec("INSERT INTO settings (`key`, `value`) VALUES ('active_office_id', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)", val)
+
+	// Update strict legacy settings (this is what attendance.go uses)
+	// We do NOT update max_checkin_distance here because that is a global setting
+	// independent of the specific office (usually).
+	// However, if the user WANTS the office's radius to become the global radius, we should update it.
+	// Based on request "reconcile... work in sync", let's update it to match the chosen office's radius too.
+
+	query := "INSERT INTO settings (`key`, `value`) VALUES " +
+		"('active_office_id', ?), " +
+		"('office_name', ?), " +
+		"('office_latitude', ?), " +
+		"('office_longitude', ?), " +
+		"('office_address', ?), " +
+		"('max_checkin_distance', ?) " +
+		"ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)"
+
+	_, err = h.db.Exec(query,
+		val,
+		name,
+		fmt.Sprintf("%f", lat),
+		fmt.Sprintf("%f", lng),
+		address,
+		fmt.Sprintf("%d", radius),
+	)
+
 	if err != nil {
 		log.Printf("Failed to set active office: %v", err)
 		utils.RespondInternalError(w, "Failed to update settings")
 		return
 	}
 
-	utils.RespondSuccess(w, "Active office updated", nil)
+	utils.RespondSuccess(w, "Active office updated and settings synced", nil)
 }

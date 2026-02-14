@@ -101,7 +101,10 @@ func (h *InternHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "i.status = ?")
 		args = append(args, status)
 	}
-	if supervisorFilter != "" {
+	if role == "pembimbing" {
+		where = append(where, "i.supervisor_id = ?")
+		args = append(args, claims.UserID)
+	} else if supervisorFilter != "" {
 		if id, err := strconv.ParseInt(supervisorFilter, 10, 64); err == nil {
 			where = append(where, "i.supervisor_id = ?")
 			args = append(args, id)
@@ -532,6 +535,14 @@ func (h *InternHandler) Update(w http.ResponseWriter, r *http.Request) {
 		internArgs = append(internArgs, internID)
 		if _, err := tx.Exec("UPDATE interns SET "+strings.Join(internUpdates, ", ")+" WHERE id = ?", internArgs...); err != nil {
 			utils.RespondInternalError(w, "Failed to update intern")
+			return
+		}
+	}
+
+	// If intern is approved/activated, ensure the linked user is no longer marked as new_user
+	if req.Status != nil && strings.EqualFold(*req.Status, "active") {
+		if _, err := tx.Exec("UPDATE users SET role = 'intern' WHERE id = ? AND role = 'new_user'", userID); err != nil {
+			utils.RespondInternalError(w, "Failed to update user role")
 			return
 		}
 	}

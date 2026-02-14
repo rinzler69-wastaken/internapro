@@ -22,20 +22,6 @@
   let searchTimeout;
   let expandedInterns = $state({});
 
-  // Keep overlay-root click-through state in sync with our modals (belt-and-suspenders).
-  $effect(() => {
-    const root =
-      typeof document !== "undefined"
-        ? document.querySelector("#overlay-root")
-        : null;
-    if (!(root instanceof HTMLElement)) return;
-    const hasModal = showCreateModal || showEditModal;
-    root.style.pointerEvents = hasModal ? "auto" : "none";
-    if (!hasModal) {
-      root.dataset.portalCount = "0";
-    }
-  });
-
   // Form State
   let form = $state({
     email: "",
@@ -795,7 +781,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="fixed inset-0 z-120 flex items-center justify-center p-4 sm:p-6"
+      class="fixed inset-0 z-120 flex items-center justify-center p-4 sm:p-6 pointer-events-auto"
       use:portal
     >
       <div
@@ -960,7 +946,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="fixed inset-0 z-120 flex items-center justify-center p-4 sm:p-6"
+      class="fixed inset-0 z-120 flex items-center justify-center p-4 sm:p-6 pointer-events-auto"
       use:portal
     >
       <div
@@ -1360,7 +1346,6 @@
 
   .sidebar,
   .topbar {
-    z-index: -20;
     position: fixed;
   }
 

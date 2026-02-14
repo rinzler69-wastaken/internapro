@@ -28,6 +28,9 @@ type RegisterInternRequest struct {
 	StartDate       string `json:"start_date,omitempty"`
 	EndDate         string `json:"end_date,omitempty"`
 	SupervisorID    *int64 `json:"supervisor_id,omitempty"`
+	GoogleID        string `json:"google_id,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	Avatar          string `json:"avatar,omitempty"`
 }
 
 // Register menangani pendaftaran magang mandiri (Public Endpoint)
@@ -69,7 +72,8 @@ func (h *InternHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if emailExists && strings.ToLower(existingRole) != "intern" {
+	// Allow OAuth pre-created users with role 'new_user' to finish registration as intern
+	if emailExists && strings.ToLower(existingRole) != "intern" && strings.ToLower(existingRole) != "new_user" {
 		http.Error(w, `{"message": "Email sudah terdaftar"}`, http.StatusConflict)
 		return
 	}
@@ -106,10 +110,15 @@ func (h *InternHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// INSERT / UPDATE USERS
 	// =================================================================================
 	var userID int64
+	provider := strings.TrimSpace(req.Provider)
+	if provider == "" {
+		provider = "local"
+	}
+
 	if !emailExists {
 		res, err := h.db.Exec(
-			"INSERT INTO users (name, email, password_hash, role, created_at, provider) VALUES (?, ?, ?, 'intern', NOW(), 'google')",
-			req.Name, req.Email, string(hashedPassword),
+			"INSERT INTO users (name, email, password_hash, role, created_at, provider, google_id, avatar) VALUES (?, ?, ?, 'intern', NOW(), ?, ?, ?)",
+			req.Name, req.Email, string(hashedPassword), provider, nullIfEmpty(req.GoogleID), nullIfEmpty(req.Avatar),
 		)
 		if err != nil {
 			fmt.Println("ERROR SQL INSERT USER:", err)
@@ -123,6 +132,13 @@ func (h *InternHandler) Register(w http.ResponseWriter, r *http.Request) {
 		userID, _ = res.LastInsertId()
 	} else {
 		userID = existingID
+		// If user was created via OAuth as "new_user", upgrade role to intern
+		if strings.ToLower(existingRole) == "new_user" {
+			if _, err := h.db.Exec("UPDATE users SET role = 'intern' WHERE id = ?", userID); err != nil {
+				http.Error(w, `{"message": "Gagal memperbarui peran user"}`, http.StatusInternalServerError)
+				return
+			}
+		}
 		// Jika belum punya password (ex: OAuth), set password baru
 		if !existingHash.Valid || existingHash.String == "" {
 			if _, err := h.db.Exec("UPDATE users SET password_hash = ?, name = ? WHERE id = ?", string(hashedPassword), req.Name, userID); err != nil {
@@ -135,6 +151,26 @@ func (h *InternHandler) Register(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, `{"message": "Gagal memperbarui profil"}`, http.StatusInternalServerError)
 				return
 			}
+		}
+
+		// Update provider/google_id/avatar if provided
+		updateFields := []string{}
+		updateArgs := []interface{}{}
+		if req.GoogleID != "" {
+			updateFields = append(updateFields, "google_id = ?")
+			updateArgs = append(updateArgs, req.GoogleID)
+		}
+		if req.Avatar != "" {
+			updateFields = append(updateFields, "avatar = ?")
+			updateArgs = append(updateArgs, req.Avatar)
+		}
+		if provider != "" && provider != "local" {
+			updateFields = append(updateFields, "provider = ?")
+			updateArgs = append(updateArgs, provider)
+		}
+		if len(updateFields) > 0 {
+			updateArgs = append(updateArgs, userID)
+			_, _ = h.db.Exec("UPDATE users SET "+strings.Join(updateFields, ", ")+" WHERE id = ?", updateArgs...)
 		}
 	}
 

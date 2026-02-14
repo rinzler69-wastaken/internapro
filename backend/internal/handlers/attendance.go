@@ -626,6 +626,9 @@ func (h *AttendanceHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		}
 		where = append(where, "a.intern_id = ?")
 		args = append(args, internID)
+	} else if role == "pembimbing" {
+		where = append(where, "i.supervisor_id = ?")
+		args = append(args, claims.UserID)
 	} else if internFilter != "" {
 		if id, err := strconv.ParseInt(internFilter, 10, 64); err == nil {
 			where = append(where, "a.intern_id = ?")

@@ -27,20 +27,6 @@
   let docOpen = $state(false);
   let docUrl = $state("");
 
-  // Keep overlay-root click-through state in sync with our modals
-  $effect(() => {
-    const root =
-      typeof document !== "undefined"
-        ? document.querySelector("#overlay-root")
-        : null;
-    if (!(root instanceof HTMLElement)) return;
-    const hasModal = detailOpen || docOpen;
-    root.style.pointerEvents = hasModal ? "auto" : "none";
-    if (!hasModal) {
-      root.dataset.portalCount = "0";
-    }
-  });
-
   // Labels & Colors
   const statusLabels = {
     present: "Hadir",

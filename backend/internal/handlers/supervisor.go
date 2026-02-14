@@ -646,3 +646,32 @@ func (h *SupervisorHandler) Register(w http.ResponseWriter, r *http.Request) {
 		"status":  "pending",
 	})
 }
+
+func (h *SupervisorHandler) GetAdminsPublic(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.db.Query(`
+		SELECT id, name
+		FROM users
+		WHERE role = 'admin'
+		ORDER BY name ASC
+	`)
+	if err != nil {
+		utils.RespondInternalError(w, "Failed to fetch admins")
+		return
+	}
+	defer rows.Close()
+
+	admins := []map[string]interface{}{}
+	for rows.Next() {
+		var userID int64
+		var name string
+		if err := rows.Scan(&userID, &name); err != nil {
+			continue
+		}
+		admins = append(admins, map[string]interface{}{
+			"user_id": userID,
+			"name":    name,
+		})
+	}
+
+	utils.RespondSuccess(w, "Admins retrieved", admins)
+}

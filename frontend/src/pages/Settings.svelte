@@ -23,7 +23,7 @@
     name: "",
     latitude: "",
     longitude: "",
-    radius_meters: 100, // Default, though global setting might override
+    radius_meters: 1000, // Default, though global setting might override
     address: "",
   });
 
@@ -41,10 +41,11 @@
     check_out_time: "17:00",
     office_latitude: "-7.052683",
     office_longitude: "110.469375",
-    max_checkin_distance: 100,
+    max_checkin_distance: 1000,
     office_name: "Kantor Pusat",
     workdays: [1, 2, 3, 4, 5, 6],
     manual_off_date: "",
+    allow_intern_unscheduled_logging: false,
   });
 
   const weekdayOptions = [
@@ -154,11 +155,12 @@
         office_latitude: map.office_latitude || "-7.052683",
         office_longitude: map.office_longitude || "110.469375",
         max_checkin_distance:
-          Number(map.max_checkin_distance ?? map.office_radius ?? 100) || 100,
+          Number(map.max_checkin_distance ?? map.office_radius ?? 1000) || 1000,
         office_name: map.office_name || "Kantor Pusat",
         workdays: parseWorkdays(map.workdays || map.work_days),
         manual_off_date: map.manual_off_date || "",
-        // active_office_id: map.active_office_id, // Removed to fix lint type error
+        allow_intern_unscheduled_logging:
+          map.ALLOW_INTERN_UNSCHEDULED_LOGGING === "true",
       };
 
       // derive tolerance logic... (same as before)
@@ -260,7 +262,7 @@
         ...newOffice,
         latitude: parseFloat(newOffice.latitude),
         longitude: parseFloat(newOffice.longitude),
-        radius_meters: parseInt(String(newOffice.radius_meters)) || 100,
+        radius_meters: parseInt(String(newOffice.radius_meters)) || 1000,
       };
       const res = await api.createOffice(payload);
       if (res.success) {
@@ -325,6 +327,9 @@
         // office_name: attendanceForm.office_name, // NO LONGER USED from here
         workdays: (attendanceForm.workdays || []).join(","),
         manual_off_date: attendanceForm.manual_off_date || "",
+        ALLOW_INTERN_UNSCHEDULED_LOGGING: String(
+          attendanceForm.allow_intern_unscheduled_logging,
+        ),
         // legacy/compat keys
         office_start_time: t(attendanceForm.check_in_time),
         office_end_time: t(attendanceForm.check_out_time),
@@ -358,11 +363,19 @@
       </div>
 
       <button
-        class="btn-blue"
+        class="btn-blue flex items-center justify-center gap-2 w-full md:w-auto"
         onclick={saveAttendanceSettings}
         disabled={savingAttendance}
       >
-        {savingAttendance ? "Menyimpan..." : "Simpan Pengaturan"}
+        {#if savingAttendance}
+          <span class="material-symbols-outlined animate-spin text-sm"
+            >refresh</span
+          >
+          <span>Menyimpan...</span>
+        {:else}
+          <span class="material-symbols-outlined text-sm">save</span>
+          <span>Simpan Pengaturan</span>
+        {/if}
       </button>
     </div>
 
@@ -454,9 +467,18 @@
               </div>
             </div>
 
-            <!-- Workdays Card -->
+            <!-- Tindakan Ekstra Card -->
             <div class="settings-section-card">
-              <div class="form-group">
+              <div class="pb-1 border-b border-slate-100 mb-4">
+                <p
+                  class="label text-slate-400 uppercase tracking-widest text-[10px]"
+                >
+                  Kontrol Operasional
+                </p>
+              </div>
+
+              <!-- Hari Kerja -->
+              <div class="form-group pb-6 mb-6 border-b border-slate-100">
                 <p class="label">Hari Kerja</p>
                 <div class="day-pills">
                   {#each weekdayOptions as day}
@@ -476,11 +498,9 @@
                   Pilih hari aktif. Minggu tidak ditampilkan.
                 </p>
               </div>
-            </div>
 
-            <!-- Day Off Card -->
-            <div class="settings-section-card">
-              <div class="form-group">
+              <!-- Day Off -->
+              <div class="form-group pb-6 mb-6 border-b border-slate-100">
                 <p class="label">Liburkan Hari Ini</p>
                 <div class="today-off-toggle">
                   <label class="checkbox-wrapper">
@@ -497,6 +517,29 @@
                     <p class="help-text">
                       Centang untuk meliburkan hari ini. Akan reset sehari
                       kemudian.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Aturan Penugasan -->
+              <div class="form-group">
+                <p class="label">Aturan Penugasan</p>
+                <div class="today-off-toggle">
+                  <label class="checkbox-wrapper">
+                    <input
+                      type="checkbox"
+                      bind:checked={
+                        attendanceForm.allow_intern_unscheduled_logging
+                      }
+                    />
+                    <span class="checkmark"></span>
+                  </label>
+                  <div>
+                    <div class="toggle-title">Self-Reporting Tugas</div>
+                    <p class="help-text">
+                      Intern mencatat tugas secara mandiri sesuai arahan
+                      penugas.
                     </p>
                   </div>
                 </div>

@@ -1,6 +1,8 @@
 <script>
+  import { goto } from "@mateothegreat/svelte5-router";
   import { api } from "../lib/api.js";
   import { auth } from "../lib/auth.svelte.js";
+  import TaskEditModal from "./TaskEditModal.svelte";
 
   const { route } = $props();
   let taskId = $state("");
@@ -17,6 +19,7 @@
   let submitting = $state(false);
   let showSubmissionForm = $state(true);
   let showReviewForm = $state(false);
+  let isEditModalOpen = $state(false);
 
   // --- HELPERS ---
   const statusLabels = {
@@ -117,8 +120,11 @@
       showSubmissionForm =
         auth.user?.role === "intern" &&
         !["submitted", "completed"].includes(task.status);
-      showReviewForm =
-        auth.user?.role !== "intern" && task.status === "submitted";
+
+      const userRole = auth.user?.role;
+      const isAdmin = userRole === "admin" || userRole === "super_admin";
+      const isAssigner = task.assigner_id === auth.user?.id;
+      showReviewForm = (isAdmin || isAssigner) && task.status === "submitted";
 
       // prefill links if needed
       if (
@@ -193,6 +199,16 @@
     }
   }
 
+  async function handleDelete() {
+    if (!confirm(`Hapus tugas "${task.title}"?`)) return;
+    try {
+      await api.deleteTask(task.id);
+      goto("/tasks");
+    } catch (err) {
+      alert(err.message || "Gagal menghapus tugas");
+    }
+  }
+
   $effect(() => {
     const params = route?.result?.path?.params || {};
     if (params?.id && params.id !== taskId) {
@@ -200,6 +216,32 @@
       fetchTask();
     }
   });
+
+  function canAction() {
+    if (!task) return false;
+    const role = auth.user?.role;
+    const userId = auth.user?.id;
+
+    if (!role) return false;
+
+    if (role === "intern") {
+      return !!task.is_unscheduled;
+    }
+
+    if (role === "supervisor" || role === "pembimbing") {
+      return task.assigner_id === userId;
+    }
+
+    if (role === "admin" || role === "super_admin") {
+      const isOwnTask = task.assigner_id === userId;
+      const isSupervisorTask =
+        task.assigner_role === "supervisor" ||
+        task.assigner_role === "pembimbing";
+      return isOwnTask || isSupervisorTask;
+    }
+
+    return false;
+  }
 </script>
 
 <div class="page-bg">
@@ -220,9 +262,57 @@
         >
         Kembali ke Daftar
       </a>
-      <div class="mt-4">
-        <h2 class="title">Detail Tugas</h2>
-        <p class="subtitle">Informasi lengkap dan progres pengerjaan.</p>
+      <div class="mt-4 flex justify-between items-end">
+        <div>
+          <h2 class="title">Detail Tugas</h2>
+          <p class="subtitle">Informasi lengkap dan progres pengerjaan.</p>
+        </div>
+        {#if canAction()}
+          <div class="flex gap-2">
+            <button
+              class="btn-edit-header"
+              onclick={() => (isEditModalOpen = true)}
+              title="Edit Tugas"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                ></path>
+                <path
+                  d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                ></path>
+              </svg>
+              <span>Edit</span>
+            </button>
+            <button
+              class="btn-delete-header"
+              onclick={handleDelete}
+              title="Hapus Tugas"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path
+                  d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                ></path>
+              </svg>
+              <span>Hapus</span>
+            </button>
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -326,7 +416,7 @@
                   </div>
                 </div>
               {/if}
-              <div class="meta-item">
+              <div class="view-item">
                 <span class="label">Diberikan Oleh</span>
                 <div class="value flex items-center gap-2">
                   <svg
@@ -340,7 +430,22 @@
                       d="M5.5 21h13M12 17c-2.5-2-4-4-4-6a4 4 0 1 1 8 0c0 2-1.5 4-4 6Z"
                     /></svg
                   >
-                  {task.assigned_by_name || "-"}
+                  {#if task.is_unscheduled}
+                    <div class="flex flex-col">
+                      <span
+                        >{task.assigner_name ||
+                          task.assigned_by_name ||
+                          "Admin"}</span
+                      >
+                      {#if task.custom_assigner_name}
+                        <span class="text-xs text-slate-400"
+                          >({task.custom_assigner_name})</span
+                        >
+                      {/if}
+                    </div>
+                  {:else}
+                    {task.assigned_by_name || "-"}
+                  {/if}
                 </div>
               </div>
               {#if task.intern_name}
@@ -735,6 +840,16 @@
   </div>
 </div>
 
+<TaskEditModal
+  isOpen={isEditModalOpen}
+  taskId={task?.id}
+  onClose={() => (isEditModalOpen = false)}
+  onSuccess={() => {
+    isEditModalOpen = false;
+    fetchTask();
+  }}
+/>
+
 <style>
   :global(body) {
     font-family: "Geist", "Inter", sans-serif;
@@ -776,6 +891,38 @@
   }
   .btn-back:hover {
     color: #0f172a;
+  }
+
+  /* BUTTONS IN HEADER */
+  .btn-edit-header,
+  .btn-delete-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .btn-edit-header {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #e2e8f0;
+  }
+  .btn-edit-header:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+  }
+  .btn-delete-header {
+    background: #fff1f2;
+    color: #e11d48;
+    border: 1px solid #ffe4e6;
+  }
+  .btn-delete-header:hover {
+    background: #ffe4e6;
+    color: #be123c;
   }
 
   /* LAYOUT */

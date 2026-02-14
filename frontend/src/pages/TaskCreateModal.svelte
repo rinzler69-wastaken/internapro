@@ -2,6 +2,7 @@
     import { api } from "../lib/api.js";
     import { portal } from "../lib/portal.js";
     import { onMount } from "svelte";
+    import { auth } from "../lib/auth.svelte.js";
 
     // Props
     let { isOpen, onClose, onSuccess, preSelected = [] } = $props();
@@ -15,26 +16,78 @@
     let deadlineTime = $state("");
     let assignTo = $state("all");
     let submissionMethod = $state("links");
+    let assignerID = $state(0);
+    let customAssignerName = $state("");
+    let assignerType = $state("supervisor");
 
     // Search & Selection State
     let searchQuery = $state("");
     let results = $state([]);
     let selected = $state([]);
+    let supervisors = $state([]);
+    let admins = $state([]);
     let loading = $state(false);
 
-    // Initialize dates
+    onMount(async () => {
+        // We now fetch when modal opens
+    });
+
+    // Fetch lists when modal opens (Lazy Loading)
     $effect(() => {
         if (isOpen) {
-            // Reset form when opened if needed, or keep state?
-            // Let's reset for a fresh start every time it opens
-            if (!title) {
-                const today = new Date().toISOString().slice(0, 10);
-                if (!startDate) startDate = today;
-                if (!deadlineTime) deadlineTime = "23:59";
-            }
-            if (preSelected && preSelected.length > 0) {
-                selected = [...preSelected];
+            (async () => {
+                try {
+                    const [supRes, admRes] = await Promise.all([
+                        api.getSupervisorsPublic(),
+                        api.getAdminsPublic(),
+                    ]);
+                    supervisors = supRes.data || [];
+                    admins = admRes.data || [];
+                } catch (err) {
+                    console.error(err);
+                }
+            })();
+        }
+    });
+
+    // Initialize dates and form when modal opens
+    $effect(() => {
+        if (isOpen) {
+            const today = new Date().toISOString().slice(0, 10);
+            if (!startDate) startDate = today;
+            if (!deadlineTime) deadlineTime = "23:59";
+
+            if (auth.user?.role === "intern") {
                 assignTo = "selected";
+                assignerType = "supervisor";
+
+                // Set supervisor ID if available
+                if (auth.user.supervisor_id) {
+                    assignerID = Number(auth.user.supervisor_id);
+                }
+
+                // Add self as selected intern
+                const internProfile = {
+                    id: auth.user.intern_id || 0,
+                    name: auth.user.name,
+                };
+                selected = [internProfile];
+            } else {
+                if (preSelected && preSelected.length > 0) {
+                    selected = [...preSelected];
+                    assignTo = "selected";
+                }
+            }
+        }
+    });
+
+    // Reset assignerID when switching between supervisor/admin tabs
+    $effect(() => {
+        if (auth.user?.role === "intern") {
+            if (assignerType === "supervisor" && auth.user.supervisor_id) {
+                assignerID = Number(auth.user.supervisor_id);
+            } else if (assignerType === "admin") {
+                assignerID = 0; // Reset to default when switching to admin
             }
         }
     });
@@ -70,6 +123,11 @@
             return;
         }
 
+        if (auth.user?.role === "intern" && !assignerID) {
+            alert("Silakan pilih pembimbing/admin yang menugaskan");
+            return;
+        }
+
         loading = true;
         try {
             await api.createTask({
@@ -82,14 +140,22 @@
                 assign_to: assignTo,
                 submission_method: submissionMethod,
                 intern_ids: selected.map((i) => i.id),
+                assigner_id: Number(assignerID),
+                custom_assigner_name: customAssignerName,
             });
 
             // Reset form
             title = "";
             description = "";
             priority = "medium";
-            assignTo = "all";
-            selected = [];
+            assignTo = auth.user?.role === "intern" ? "selected" : "all";
+            selected = auth.user?.role === "intern" ? selected : [];
+            assignerID =
+                auth.user?.role === "intern"
+                    ? Number(auth.user.supervisor_id) || 0
+                    : 0;
+            assignerType = "supervisor";
+            customAssignerName = "";
 
             onSuccess?.();
             onClose?.();
@@ -235,135 +301,269 @@
                                 />
                             </div>
                         </div>
+
+                        <div class="form-group mt-4">
+                            <label class="label" for="deadlineTime"
+                                >Waktu Deadline</label
+                            >
+                            <input
+                                class="input-field"
+                                type="time"
+                                bind:value={deadlineTime}
+                                id="deadlineTime"
+                            />
+                        </div>
                     </div>
 
                     <!-- KOLOM KANAN: PENUGASAN -->
                     <div class="section right-section">
-                        <div class="form-group">
-                            <label class="label" for="assignTo"
-                                >Penerima Tugas</label
-                            >
-                            <div class="radio-group">
-                                <label
-                                    class={`radio-btn ${assignTo === "all" ? "active" : ""}`}
-                                >
-                                    <input
-                                        type="radio"
-                                        value="all"
-                                        bind:group={assignTo}
-                                        hidden
-                                    />
-                                    <span>Semua</span>
-                                </label>
-                                <label
-                                    class={`radio-btn ${assignTo === "selected" ? "active" : ""}`}
-                                >
-                                    <input
-                                        type="radio"
-                                        value="selected"
-                                        bind:group={assignTo}
-                                        hidden
-                                    />
-                                    <span>Manual</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        {#if assignTo === "selected"}
-                            <div class="search-section mt-4 animate-fade-in">
-                                <div class="form-group">
-                                    <!-- <label class="label" for="searchQuery">Cari Peserta</label> -->
-                                    <div class="search-wrapper">
-                                        <svg
-                                            width="16"
-                                            height="16"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            class="search-icon"
-                                            ><circle
-                                                cx="11"
-                                                cy="11"
-                                                r="8"
-                                            /><line
-                                                x1="21"
-                                                y1="21"
-                                                x2="16.65"
-                                                y2="16.65"
-                                            /></svg
-                                        >
+                        {#if auth.user?.role === "intern"}
+                            <!-- INTERN VIEW: SELECT ASSIGNER -->
+                            <div class="form-group">
+                                <label class="label">Tipe Pemberi Tugas</label>
+                                <div class="radio-group mb-2">
+                                    <label
+                                        class={`radio-btn ${assignerType === "supervisor" ? "active" : ""}`}
+                                    >
                                         <input
-                                            class="input-field pl-9"
-                                            bind:value={searchQuery}
-                                            oninput={searchInterns}
-                                            placeholder="Cari peserta..."
-                                            id="searchQuery"
-                                            style="font-size: 13px;"
+                                            type="radio"
+                                            value="supervisor"
+                                            bind:group={assignerType}
+                                            hidden
                                         />
-                                    </div>
+                                        <span>Pembimbing</span>
+                                    </label>
+                                    <label
+                                        class={`radio-btn ${assignerType === "admin" ? "active" : ""}`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            value="admin"
+                                            bind:group={assignerType}
+                                            hidden
+                                        />
+                                        <span>Admin</span>
+                                    </label>
                                 </div>
+                            </div>
 
-                                <div class="selection-container">
-                                    {#if selected.length > 0}
-                                        <div class="selected-tags">
-                                            {#each selected as item}
-                                                <div class="tag">
-                                                    {item.label.split(" - ")[0]}
-                                                    <button
-                                                        onclick={() =>
-                                                            removeSelected(
-                                                                item.id,
-                                                            )}
-                                                        class="btn-remove"
-                                                        >×</button
-                                                    >
-                                                </div>
-                                            {/each}
-                                        </div>
-                                    {/if}
-
-                                    <div class="results-list">
-                                        {#if results.length > 0}
-                                            {#each results as intern}
-                                                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                                                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                                                <div
-                                                    class="intern-card {selected.find(
-                                                        (i) =>
-                                                            i.id === intern.id,
-                                                    )
-                                                        ? 'selected'
-                                                        : ''}"
-                                                    onclick={() =>
-                                                        toggleIntern(intern)}
-                                                >
-                                                    <div
-                                                        class="checkbox-circle"
-                                                    >
-                                                        {#if selected.find((i) => i.id === intern.id)}✓{/if}
-                                                    </div>
-                                                    <span class="intern-name"
-                                                        >{intern.label}</span
-                                                    >
-                                                </div>
-                                            {/each}
-                                        {:else if searchQuery}
-                                            <div class="empty-search">
-                                                Tidak ada hasil.
+                            <div class="form-group mt-2">
+                                <label class="label" for="assignerID">
+                                    Pilih {assignerType === "admin"
+                                        ? "Admin"
+                                        : "Pembimbing"} Penugasan
+                                    <span class="text-red-500">*</span>
+                                </label>
+                                {#if auth.user?.role === "intern" && assignerType === "supervisor"}
+                                    <div class="read-only-card">
+                                        {#if auth.user?.supervisor_id}
+                                            <div class="card-avatar">
+                                                {auth.user.supervisor_name?.[0]?.toUpperCase() ||
+                                                    "P"}
                                             </div>
+                                            <div class="card-info">
+                                                <span class="card-tag"
+                                                    >Pembimbing Anda</span
+                                                >
+                                                <span class="card-name">
+                                                    {auth.user
+                                                        .supervisor_name ||
+                                                        "Pembimbing"}
+                                                </span>
+                                            </div>
+                                            <div class="card-icon">
+                                                <span
+                                                    class="material-symbols-outlined"
+                                                    >lock</span
+                                                >
+                                            </div>
+                                        {:else}
+                                            <p class="text-sm text-gray-600">
+                                                Tidak ada pembimbing yang
+                                                ditentukan.
+                                            </p>
                                         {/if}
                                     </div>
-                                </div>
+                                {:else}
+                                    <div class="select-wrapper">
+                                        <select
+                                            class="input-field select"
+                                            bind:value={assignerID}
+                                            id="assignerID"
+                                        >
+                                            <option value={0}
+                                                >-- Pilih {assignerType ===
+                                                "admin"
+                                                    ? "Admin"
+                                                    : "Pembimbing"} --</option
+                                            >
+                                            {#each assignerType === "admin" ? admins : supervisors as p}
+                                                <option value={p.user_id}>
+                                                    {p.name || p.full_name}
+                                                </option>
+                                            {/each}
+                                        </select>
+                                        <div class="select-arrow">▼</div>
+                                    </div>
+                                {/if}
                             </div>
-                        {:else}
-                            <div class="info-box mt-4">
-                                <p>
-                                    Tugas akan diberikan kepada seluruh peserta
-                                    magang yang statusnya <strong>Aktif</strong
-                                    >.
+
+                            <div class="form-group mt-4">
+                                <label class="label" for="customAssignerName"
+                                    >Nama Pemberi Tugas (Opsional)</label
+                                >
+                                <input
+                                    class="input-field"
+                                    bind:value={customAssignerName}
+                                    id="customAssignerName"
+                                    placeholder="Contoh: Pak Shafwan"
+                                />
+                                <p class="info-box">
+                                    Isi bila tugas diberikan oleh staf tertentu
+                                    di kantor.
                                 </p>
                             </div>
+
+                            <div class="info-box mt-6">
+                                <p>
+                                    Tugas ini akan dicatat sebagai laporan
+                                    mandiri dan menunggu review dari pembimbing.
+                                </p>
+                            </div>
+                        {:else}
+                            <!-- ADMIN VIEW -->
+                            <div class="form-group">
+                                <label class="label" for="assignTo"
+                                    >Penerima Tugas</label
+                                >
+                                <div class="radio-group">
+                                    <label
+                                        class={`radio-btn ${assignTo === "all" ? "active" : ""}`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            value="all"
+                                            bind:group={assignTo}
+                                            hidden
+                                        />
+                                        <span>Semua</span>
+                                    </label>
+                                    <label
+                                        class={`radio-btn ${assignTo === "selected" ? "active" : ""}`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            value="selected"
+                                            bind:group={assignTo}
+                                            hidden
+                                        />
+                                        <span>Manual</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {#if assignTo === "selected"}
+                                <div
+                                    class="search-section mt-4 animate-fade-in"
+                                >
+                                    <div class="form-group">
+                                        <div class="search-wrapper">
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                class="search-icon"
+                                                ><circle
+                                                    cx="11"
+                                                    cy="11"
+                                                    r="8"
+                                                /><line
+                                                    x1="21"
+                                                    y1="21"
+                                                    x2="16.65"
+                                                    y2="16.65"
+                                                /></svg
+                                            >
+                                            <input
+                                                class="input-field pl-9"
+                                                bind:value={searchQuery}
+                                                oninput={searchInterns}
+                                                placeholder="Cari peserta..."
+                                                id="searchQuery"
+                                                style="font-size: 13px;"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div class="selection-container">
+                                        {#if selected.length > 0}
+                                            <div class="selected-tags">
+                                                {#each selected as item}
+                                                    <div class="tag">
+                                                        {item.label?.split(
+                                                            " - ",
+                                                        )[0] || item.name}
+                                                        <button
+                                                            onclick={() =>
+                                                                removeSelected(
+                                                                    item.id,
+                                                                )}
+                                                            class="btn-remove"
+                                                            >×</button
+                                                        >
+                                                    </div>
+                                                {/each}
+                                            </div>
+                                        {/if}
+
+                                        <div class="results-list">
+                                            {#if results.length > 0}
+                                                {#each results as intern}
+                                                    <div
+                                                        class="intern-card {selected.find(
+                                                            (i) =>
+                                                                i.id ===
+                                                                intern.id,
+                                                        )
+                                                            ? 'selected'
+                                                            : ''}"
+                                                        onclick={() =>
+                                                            toggleIntern(
+                                                                intern,
+                                                            )}
+                                                    >
+                                                        <div
+                                                            class="checkbox-circle"
+                                                        >
+                                                            {#if selected.find((i) => i.id === intern.id)}✓{/if}
+                                                        </div>
+                                                        <span
+                                                            class="intern-name"
+                                                            >{intern.label}</span
+                                                        >
+                                                    </div>
+                                                {/each}
+                                            {:else if searchQuery}
+                                                <div class="empty-search">
+                                                    Tidak ada hasil.
+                                                </div>
+                                            {/if}
+                                        </div>
+                                    </div>
+                                </div>
+                            {:else}
+                                <div class="info-box mt-4">
+                                    <p>
+                                        Tugas akan diberikan kepada seluruh
+                                        peserta magang yang statusnya <strong
+                                            >Aktif</strong
+                                        >.
+                                    </p>
+                                </div>
+                            {/if}
                         {/if}
                     </div>
                 </div>
@@ -746,6 +946,60 @@
         to {
             transform: rotate(360deg);
         }
+    }
+
+    .read-only-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        margin-top: 8px;
+        transition: all 0.2s;
+    }
+    .read-only-card:hover {
+        background: #f1f5f9;
+        border-color: #cbd5e1;
+    }
+    .card-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        background: #6366f1;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 14px;
+        box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
+    }
+    .card-info {
+        display: flex;
+        flex-direction: column;
+    }
+    .card-tag {
+        font-size: 10px;
+        font-weight: 700;
+        color: #6366f1;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        line-height: 1;
+        margin-bottom: 2px;
+    }
+    .card-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1e293b;
+    }
+    .card-icon {
+        margin-left: auto;
+        color: #94a3b8;
+    }
+    .card-icon span {
+        font-size: 18px;
     }
 
     .animate-scale-up {

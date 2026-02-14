@@ -18,7 +18,7 @@
       oauth: 'google',
       status: 'unregistered'
     }).toString();
-    replace(`/register-intern?${params}`);
+    replace(`/register?${params}`);
   }
 </script>
 

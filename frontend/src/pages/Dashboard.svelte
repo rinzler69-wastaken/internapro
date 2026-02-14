@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { replace } from "@mateothegreat/svelte5-router";
   import { auth } from '../lib/auth.svelte.js';
   import { api } from '../lib/api.js';
   import AdminDashboard from './AdminDashboard.svelte';
@@ -32,6 +33,9 @@
 
   $effect(() => {
     console.log('Dashboard Auth State:', { user: auth.user, role: userRole, internProfile });
+    if (!loading && internProfile?.status === 'pending') {
+      replace('/waiting-approval');
+    }
   });
 </script>
 

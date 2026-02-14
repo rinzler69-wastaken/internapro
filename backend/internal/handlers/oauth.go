@@ -4,15 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"dsi_interna_sys/internal/config"
 	"dsi_interna_sys/internal/models"
 	"dsi_interna_sys/internal/utils"
-
-	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -130,31 +133,20 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 	)
 
 	setupRequired := false
-	if errUser == sql.ErrNoRows {
-		// Auto-register as "new_user"
-		// We insert the user with role 'new_user' and allow them to complete profile later
-		res, err := h.db.Exec(
-			"INSERT INTO users (name, email, role, google_id, provider, avatar, created_at) VALUES (?, ?, 'new_user', ?, 'google', ?, NOW())",
-			info.Name, info.Email, info.ID, info.Picture,
-		)
-		if err != nil {
-			utils.RespondInternalError(w, "Failed to create new user: "+err.Error())
-			return
+	avatarPath := ""
+	if info.Picture != "" {
+		if saved, err := saveRemoteAvatar(info.Picture); err == nil && saved != "" {
+			avatarPath = saved
+		} else {
+			// fall back to remote URL so frontend can still show something
+			avatarPath = info.Picture
 		}
-		userID, _ := res.LastInsertId()
+	}
 
-		// Fill the user struct for token generation
-		user.ID = userID
-		user.Name = sql.NullString{String: info.Name, Valid: true}
-		user.Email = info.Email
-		user.Role = "new_user"
-		user.Avatar = sql.NullString{String: info.Picture, Valid: true}
-		user.GoogleID = sql.NullString{String: info.ID, Valid: true}
-		user.Provider = sql.NullString{String: "google", Valid: true}
-		user.Is2FAEnabled = false
-		user.CreatedAt = time.Now()
-
-		setupRequired = true // Effectively they need setup (profile completion)
+	if errUser == sql.ErrNoRows {
+		// Do NOT create a DB row. Redirect to register with prefill data.
+		sendRegisterRedirect(w, r, info.Email, info.Name, info.Picture, info.ID)
+		return
 	} else if errUser != nil {
 		utils.RespondInternalError(w, "Database error")
 		return
@@ -170,16 +162,82 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 		if !user.Provider.Valid || user.Provider.String == "" {
 			updates = append(updates, "provider = 'google'")
 		}
-		// Always update avatar if available from Google
-		if info.Picture != "" && (!user.Avatar.Valid || user.Avatar.String != info.Picture) {
+		// Always update avatar if available from Google (prefer saved local path)
+		if avatarPath != "" && (!user.Avatar.Valid || user.Avatar.String != avatarPath) {
 			updates = append(updates, "avatar = ?")
-			args = append(args, info.Picture)
+			args = append(args, avatarPath)
 		}
 
 		if len(updates) > 0 {
 			query := "UPDATE users SET " + strings.Join(updates, ", ") + " WHERE id = ?"
 			args = append(args, user.ID)
 			_, _ = h.db.Exec(query, args...)
+		}
+
+		// If user was pending completion but already has an intern profile, upgrade role
+		if strings.EqualFold(user.Role, "new_user") {
+			var status string
+			if err := h.db.QueryRow("SELECT status FROM interns WHERE user_id = ? LIMIT 1", user.ID).Scan(&status); err == nil {
+				if status != "" {
+					newRole := "intern"
+					user.Role = newRole
+					_, _ = h.db.Exec("UPDATE users SET role = ? WHERE id = ?", newRole, user.ID)
+				}
+			}
+		}
+	}
+
+	normalizedRole := strings.ToLower(strings.TrimSpace(user.Role))
+	if normalizedRole == "supervisor" {
+		normalizedRole = "pembimbing"
+		user.Role = "pembimbing"
+	}
+
+	// Enforce the same approval/status gates as password login.
+	switch normalizedRole {
+	case "intern":
+		var internStatus string
+		err := h.db.QueryRow("SELECT status FROM interns WHERE user_id = ? LIMIT 1", user.ID).Scan(&internStatus)
+		if err == sql.ErrNoRows {
+			sendRegisterRedirect(w, r, info.Email, info.Name, info.Picture, info.ID)
+			return
+		}
+		if err != nil {
+			utils.RespondInternalError(w, "Gagal memeriksa status magang")
+			return
+		}
+
+		switch strings.ToLower(strings.TrimSpace(internStatus)) {
+		case "active":
+			// allow login
+		case "pending":
+			sendFrontendRedirect(w, r, "/waiting-approval")
+			return
+		default:
+			sendFrontendRedirect(w, r, "/login?error="+url.QueryEscape("Akun magang tidak aktif. Hubungi admin."))
+			return
+		}
+	case "pembimbing":
+		var supervisorStatus string
+		err := h.db.QueryRow("SELECT status FROM supervisors WHERE user_id = ? LIMIT 1", user.ID).Scan(&supervisorStatus)
+		if err == sql.ErrNoRows {
+			sendFrontendRedirect(w, r, "/login?error="+url.QueryEscape("Profil pembimbing belum lengkap. Hubungi admin."))
+			return
+		}
+		if err != nil {
+			utils.RespondInternalError(w, "Gagal memeriksa status pembimbing")
+			return
+		}
+
+		switch strings.ToLower(strings.TrimSpace(supervisorStatus)) {
+		case "active":
+			// allow login
+		case "pending":
+			sendFrontendRedirect(w, r, "/waiting-approval")
+			return
+		default:
+			sendFrontendRedirect(w, r, "/login?error="+url.QueryEscape("Akun pembimbing tidak aktif. Hubungi admin."))
+			return
 		}
 	}
 
@@ -190,7 +248,6 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Always redirect to frontend. Frontend determines next step based on user role ("new_user")
 	redirect := r.URL.Query().Get("redirect")
 	if strings.TrimSpace(redirect) == "" {
 		if rc, err := r.Cookie("oauth_redirect"); err == nil && rc.Value != "" {
@@ -203,6 +260,11 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 				Path:   "/",
 			})
 		}
+	}
+
+	// Force new_user to /register
+	if user.Role == "new_user" {
+		redirect = "/register"
 	}
 
 	if strings.TrimSpace(redirect) == "" {
@@ -221,7 +283,7 @@ func (h *AuthHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, finalURL, http.StatusFound)
 }
 
-func sendRegisterRedirect(w http.ResponseWriter, r *http.Request, email, name string) {
+func sendRegisterRedirect(w http.ResponseWriter, r *http.Request, email, name, avatar, googleID string) {
 	params := url.Values{}
 	if email != "" {
 		params.Set("email", email)
@@ -229,8 +291,71 @@ func sendRegisterRedirect(w http.ResponseWriter, r *http.Request, email, name st
 	if name != "" {
 		params.Set("name", name)
 	}
+	if avatar != "" {
+		params.Set("avatar", avatar)
+	}
+	if googleID != "" {
+		params.Set("google_id", googleID)
+	}
 	params.Set("oauth", "google_unregistered")
 
 	redirectURL := config.Loaded.OAuth.FrontendURL + "/register?" + params.Encode()
 	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+func sendFrontendRedirect(w http.ResponseWriter, r *http.Request, path string) {
+	http.Redirect(w, r, config.Loaded.OAuth.FrontendURL+path, http.StatusFound)
+}
+
+// saveRemoteAvatar downloads an image from a remote URL and stores it in the uploads/avatars directory.
+// Returns the relative path (e.g., "avatars/abc.jpg") or an empty string on failure.
+func saveRemoteAvatar(pictureURL string) (string, error) {
+	if pictureURL == "" {
+		return "", nil
+	}
+
+	cfg := config.Loaded
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(pictureURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch avatar: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("avatar fetch returned status %d", resp.StatusCode)
+	}
+
+	limitedReader := io.LimitReader(resp.Body, cfg.Upload.MaxSize)
+	data, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return "", fmt.Errorf("failed to read avatar: %w", err)
+	}
+
+	// Detect content type to pick extension
+	contentType := http.DetectContentType(data)
+	ext := ".jpg"
+	switch {
+	case strings.Contains(contentType, "png"):
+		ext = ".png"
+	case strings.Contains(contentType, "jpeg"), strings.Contains(contentType, "jpg"):
+		ext = ".jpg"
+	}
+
+	// Ensure upload dir exists
+	uploadDir := filepath.Join(cfg.Upload.Dir, "avatars")
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create upload dir: %w", err)
+	}
+
+	filename := fmt.Sprintf("google_%d%s", time.Now().UnixNano(), ext)
+	fullPath := filepath.Join(uploadDir, filename)
+
+	if err := os.WriteFile(fullPath, data, 0644); err != nil {
+		return "", fmt.Errorf("failed to save avatar: %w", err)
+	}
+
+	// Return relative path for serving
+	return filepath.Join("avatars", filename), nil
 }
