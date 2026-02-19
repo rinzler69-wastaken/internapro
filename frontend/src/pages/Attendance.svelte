@@ -5,6 +5,7 @@
   import { portal } from "../lib/portal.js";
   import { auth } from "../lib/auth.svelte.js";
   import { getAvatarUrl } from "../lib/utils.js";
+  import Pagination from "../components/Pagination.svelte";
 
   // State
   let records = $state([]);
@@ -249,62 +250,14 @@
           <span>Refresh</span>
         </button>
       </div>
-      <div class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2">
-        <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {totalPages <=
-          1
-            ? 'opacity-40 cursor-not-allowed'
-            : ''}"
-          onclick={goToPreviousPage}
-          disabled={currentPage <= 1 || totalPages <= 1}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"><path d="M15 18l-6-6 6-6" /></svg
-          >
-          <span>Prev</span>
-        </button>
-
-        <div
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 pagination-pill {totalPages <=
-          1
-            ? 'opacity-40'
-            : ''}"
-        >
-          <span>{currentPage}</span>
-          <span class="text-slate-500">of</span>
-          <span>{totalPages}</span>
-        </div>
-
-        <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {totalPages <=
-          1
-            ? 'opacity-40 cursor-not-allowed'
-            : ''}"
-          onclick={goToNextPage}
-          disabled={currentPage >= totalPages || totalPages <= 1}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg
-          >
-          <span>Next</span>
-        </button>
-      </div>
+      <Pagination
+        {currentPage}
+        {totalPages}
+        onPageChange={(page) => {
+          currentPage = page;
+          fetchAttendance();
+        }}
+      />
     </div>
 
     <div class="toolbar">
@@ -616,7 +569,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6"
+    class="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 pointer-events-auto"
     use:portal
     onclick={closeDetail}
   >
@@ -799,7 +752,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6"
+    class="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 pointer-events-auto"
     use:portal
     onclick={closeDoc}
   >

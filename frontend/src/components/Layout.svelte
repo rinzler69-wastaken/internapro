@@ -61,6 +61,10 @@
     pointer-events: none;
   }
 
+  :global(#overlay-root > *) {
+    pointer-events: auto;
+  }
+
   .main-content {
     /* Space for fixed topbar at the top */
     padding-top: 108px;

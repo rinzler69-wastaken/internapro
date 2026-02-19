@@ -9,6 +9,7 @@
 
   import ReportCreateModal from "./ReportCreateModal.svelte";
   import ReportEditModal from "./ReportEditModal.svelte";
+  import Pagination from "../components/Pagination.svelte";
 
   // State
   let reports = $state([]);
@@ -171,7 +172,7 @@
           <span>Buat Laporan</span>
         </button>
         <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+          class="flex-none md:flex-none w-10 h-10 md:w-auto md:h-auto md:px-5 md:py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
           onclick={fetchReports}
         >
           <svg
@@ -188,67 +189,17 @@
               d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"
             /></svg
           >
-          <span>Refresh</span>
+          <span class="hidden md:inline">Refresh</span>
         </button>
       </div>
-      <div
-        class="flex flex-wrap md:flex-nowrap w-full md:w-auto gap-2 {totalPages <=
-        1
-          ? 'opacity-50 pointer-events-none'
-          : ''}"
-      >
-        <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {currentPage <=
-          1
-            ? 'opacity-50 cursor-not-allowed'
-            : 'cursor-pointer'}"
-          onclick={goToPreviousPage}
-          disabled={currentPage <= 1}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"><path d="M15 18l-6-6 6-6" /></svg
-          >
-          <span>Prev</span>
-        </button>
-
-        <div
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 pagination-pill"
-        >
-          <span>{currentPage}</span>
-          <span class="text-slate-500">of</span>
-          <span>{totalPages}</span>
-        </div>
-
-        <button
-          class="flex-1 md:flex-none px-5 py-2 rounded-full text-sm font-semibold bg-white text-slate-900 border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-center gap-2 {currentPage >=
-          totalPages
-            ? 'opacity-50 cursor-not-allowed'
-            : 'cursor-pointer'}"
-          onclick={goToNextPage}
-          disabled={currentPage >= totalPages}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg
-          >
-          <span>Next</span>
-        </button>
-      </div>
+      <Pagination
+        {currentPage}
+        {totalPages}
+        onPageChange={(page) => {
+          currentPage = page;
+          fetchReports();
+        }}
+      />
     </div>
 
     <div class="toolbar">

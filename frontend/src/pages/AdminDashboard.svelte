@@ -927,7 +927,7 @@
     <!-- Mobile Header -->
     <div class="md:hidden flex flex-col gap-4">
       <h2 class="text-xl font-semibold text-slate-800 tracking-tight">
-        Admin Dashboard, <span class="highlight"
+        Selamat Datang, <span class="highlight"
           >{auth.user?.name || "Admin"}</span
         >
       </h2>

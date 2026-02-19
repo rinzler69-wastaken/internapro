@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -74,6 +75,8 @@ func (h *PasswordResetHandler) RequestReset(w http.ResponseWriter, r *http.Reque
 	if config.Loaded.SMTP.Host != "" && config.Loaded.SMTP.From != "" {
 		if err := utils.SendMail(email, subject, body); err == nil {
 			sent = true
+		} else {
+			log.Printf("Email sending failed to %s: %v", email, err)
 		}
 	}
 
